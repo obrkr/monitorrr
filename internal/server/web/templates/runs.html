@@ -1,0 +1,55 @@
+{{define "runs.html"}}
+{{template "head" .}}
+
+<section class="stats">
+  <div class="stat">
+    <div class="stat-label">Runs recorded</div>
+    <div class="stat-value" id="stat-runs">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">In flight</div>
+    <div class="stat-value" id="stat-pending">—</div>
+    <div class="stat-hint">queued or awaiting a result</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Failed</div>
+    <div class="stat-value bad" id="stat-failed">—</div>
+    <div class="stat-hint">non-zero exit, or never reported</div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Run history</h2>
+    <span class="muted">select a run to see its output and the exact script that was sent</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>State</th>
+          <th>Script</th>
+          <th>Device</th>
+          <th>Exit</th>
+          <th>Duration</th>
+          <th>Dispatched by</th>
+          <th>When</th>
+        </tr>
+      </thead>
+      <tbody id="jobs-body">
+        <tr class="empty"><td colspan="7">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel" id="job-detail" hidden>
+  <div class="panel-head">
+    <h2 id="detail-title">Run detail</h2>
+    <button class="ghost" id="close-detail">Close</button>
+  </div>
+  <div id="detail-body"></div>
+</section>
+
+{{template "foot" .}}
+{{end}}

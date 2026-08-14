@@ -1,0 +1,76 @@
+{{define "scripts.html"}}
+{{template "head" .}}
+
+<section class="split">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Scripts</h2>
+      <button id="new-script">New</button>
+    </div>
+    <ul class="script-list" id="script-list">
+      <li class="muted pad">Loading…</li>
+    </ul>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2 id="editor-title">New script</h2>
+      <span class="muted" id="script-hash"></span>
+    </div>
+    <form id="script-form" class="editor">
+      <input type="hidden" id="script-id">
+      <div class="editor-row">
+        <label for="script-name">Name</label>
+        <input type="text" id="script-name" required placeholder="restart-print-spooler">
+      </div>
+      <div class="editor-row">
+        <label for="script-desc">Description</label>
+        <input type="text" id="script-desc" placeholder="what this fixes, and when to run it">
+      </div>
+      <div class="editor-row split-row">
+        <div>
+          <label for="script-interpreter">Interpreter</label>
+          <select id="script-interpreter">
+            <option value="sh">sh — Linux &amp; macOS</option>
+            <option value="powershell">powershell — Windows</option>
+          </select>
+        </div>
+        <div>
+          <label for="script-timeout">Timeout</label>
+          <input type="number" id="script-timeout" min="1" max="3600" value="300"> <span class="unit">sec</span>
+        </div>
+      </div>
+      <div class="editor-row">
+        <label for="script-content">Script</label>
+        <textarea id="script-content" rows="14" spellcheck="false" required
+          placeholder="#!/bin/sh&#10;set -eu&#10;echo &quot;disk usage:&quot;&#10;df -h /"></textarea>
+      </div>
+      <div class="editor-actions">
+        <button type="submit" class="primary">Save</button>
+        <button type="button" id="delete-script" class="danger" hidden>Delete</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Run on devices</h2>
+    <span class="muted" id="dispatch-note">save or select a script first</span>
+  </div>
+  <div class="picker-toolbar">
+    <button type="button" id="select-all" class="ghost">Select all compatible</button>
+    <button type="button" id="select-none" class="ghost">Clear</button>
+    <span class="muted" id="selection-count">0 selected</span>
+  </div>
+  <div class="device-picker" id="device-picker">
+    <p class="muted pad">Loading devices…</p>
+  </div>
+  <div class="editor-actions">
+    <button type="button" id="run-btn" class="primary" disabled>Run on selected</button>
+    <span class="muted">Dispatch is explicit — nothing runs on its own. Results appear under <a href="/runs">Runs</a>.</span>
+  </div>
+</section>
+
+{{template "foot" .}}
+{{end}}

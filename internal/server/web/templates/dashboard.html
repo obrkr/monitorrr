@@ -1,0 +1,64 @@
+{{define "dashboard.html"}}
+{{template "head" .}}
+
+<section class="stats">
+  <div class="stat">
+    <div class="stat-label">Devices</div>
+    <div class="stat-value" id="stat-total">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Online</div>
+    <div class="stat-value ok" id="stat-online">—</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Offline</div>
+    <div class="stat-value bad" id="stat-offline">—</div>
+  </div>
+  <div class="stat interval-stat">
+    <div class="stat-label">Check-in interval</div>
+    <form class="interval-form" id="interval-form">
+      <input type="number" id="interval-input" min="5" max="86400" step="5" required>
+      <span class="unit">sec</span>
+      <button type="submit">Save</button>
+    </form>
+    <div class="stat-hint" id="interval-hint">Applied on each agent's next check-in.</div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Reporting devices</h2>
+    <span class="muted" id="refresh-note">refreshing every 5s</span>
+  </div>
+  <div class="table-wrap">
+    <table id="devices">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Hostname</th>
+          <th>Platform</th>
+          <th>Agent</th>
+          <th>Address</th>
+          <th>Last seen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="devices-body">
+        <tr class="empty"><td colspan="7">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Recent activity</h2>
+    <span class="muted">state changes only — heartbeats are not logged</span>
+  </div>
+  <ul class="events" id="events">
+    <li class="muted">Loading…</li>
+  </ul>
+</section>
+
+{{template "foot" .}}
+{{end}}

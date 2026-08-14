@@ -1,0 +1,183 @@
+# monitorrr
+
+A lightweight endpoint visibility tool for a home lab — a very small take on the
+Nexthink idea. Agents check in on a schedule, the dashboard shows who is
+reporting, and (from milestone 2) you can push a shell or PowerShell script to
+selected machines.
+
+Two static binaries, one SQLite file, no runtime dependencies on either side.
+
+## What it does
+
+**Monitoring (milestone 1)**
+
+- **Cross-platform agent** — Windows, macOS, Linux (amd64 + arm64) from one codebase
+- **Online / offline state** with last-seen timestamps
+- **Addresses** — public source address plus the device's own interfaces
+- **Configurable check-in interval**, changed centrally and adopted fleet-wide
+- **Dashboard** — live device table and an activity timeline
+- **Deployment panel** — agent downloads, enrollment token, per-OS install steps
+
+**Remote execution (milestone 2)**
+
+- **Scripts panel** — write and store `sh` and `powershell` scripts, each with
+  its own timeout
+- **Explicit dispatch** — pick devices and run; nothing executes on its own
+- **Runs panel** — state, exit code, duration, stdout/stderr, and the exact
+  script body that was sent
+- **Compatibility enforced** — a PowerShell script cannot be queued against a
+  Linux box, and a mixed selection fails rather than half-running
+
+## Quick start
+
+```bash
+make build-all          # server + agents for every platform
+make run                # serves on :8080
+```
+
+Open <http://localhost:8080>. The enrollment token is printed at startup and
+shown on the Deployment page. On a Linux or macOS target:
+
+```bash
+curl -fsSL "http://your-server:8080/install.sh?token=<token>" | sudo sh
+```
+
+The installer detects the machine's OS and CPU architecture, fetches the
+matching build, installs to `/usr/local/bin`, and registers a systemd service or
+launchd daemon. Pass `--no-service` or `--prefix DIR` to change that (through a
+pipe: `| sudo sh -s -- --no-service`).
+
+Architecture detection is the point: a Linux VM on an Apple Silicon host is
+arm64, and running an amd64 build there fails with `cannot execute binary file`.
+The Deployment page also lists every build for manual download, and carries
+copy-paste service definitions for systemd, launchd, and a Windows scheduled
+task.
+
+## How it works
+
+Every exchange is agent-initiated outbound HTTPS, so agents work behind NAT with
+no inbound firewall rules or VPN. The check-in response doubles as the control
+channel — the server piggybacks interval changes (and later, queued jobs) onto
+the reply the agent is already waiting for.
+
+```
+agent                                server
+  ├── POST /v1/enroll ──────────────► verify shared token, issue device identity
+  │   ◄── agent_id + agent_token
+  │
+  ├── POST /v1/checkin (every N s) ─► update last_seen, record any transitions
+  │   ◄── {interval, jobs[]}          piggybacked control data
+  │
+  └── (sweeper marks a device offline after 3 missed check-ins)
+```
+
+### Retire vs delete
+
+Two different operations that are easy to confuse, so the dashboard names them
+apart:
+
+| | Delete | Retire |
+|---|---|---|
+| Server record | removed, with all history | kept, marked retired |
+| Agent on the machine | untouched, keeps running | uninstalls itself |
+| Next check-in | 401 → re-enrolls as a new device | receives retire, tears down, exits |
+| Use it for | resetting a device's identity | decommissioning a machine |
+
+Retirement is a request, not an instant state. The device shows **Retiring…**
+until its agent next checks in, so a machine that is powered off is not silently
+forgotten — it retires whenever it next comes back. Queued jobs are cancelled on
+request, and no new ones can be aimed at it.
+
+The teardown runs in a **detached helper process**, not inline. Stopping your own
+service from inside it is a race you cannot win: systemd would kill the agent
+partway through its own cleanup, and Windows refuses to delete a running
+executable. Handing the work to a process that outlives the agent avoids both.
+
+The agent only removes its binary if it is running from the canonical install
+path (`/usr/local/bin/monitorrr-agent`, or `C:\Program Files\monitorrr\`).
+Someone testing a build from a working directory should not have it deleted out
+from under them.
+
+### Job lifecycle
+
+A job is `queued` when dispatched, flips to `running` when an agent collects it
+on a check-in (claiming is transactional, so a job is handed out exactly once),
+and becomes `done` when the result is posted back. A sweeper marks it `lost` if
+the agent never reports — a machine rebooted mid-script, say — so nothing sits
+in `running` forever.
+
+Details that matter in practice:
+
+- Jobs run on their own goroutine in the agent, so a five-minute script never
+  delays heartbeats and makes the device look offline.
+- Scripts execute in their own **process group**, and a timeout kills the group.
+  Killing only the shell leaves `sleep 60` running, and because that grandchild
+  inherits the output pipe, the agent would block until it finished anyway.
+- The agent verifies the script's SHA-256 before writing it to disk. A mismatch
+  is refused outright rather than partially executed.
+- A non-zero exit is a normal result, not an execution failure. `Error` is
+  reserved for "could not run it at all" — timeout, missing interpreter,
+  checksum mismatch.
+- Each job snapshots the script body and hash. Editing or deleting a script
+  never rewrites what the audit trail says already ran.
+- Output is capped at 64 KB per stream, at the agent and again at the store.
+
+**Heartbeats are not stored.** Writing a row per check-in would be ~1,400 rows
+per device per day to answer a question that one mutable `last_seen` column
+already answers. Only *transitions* — enrolled, online, offline, address change,
+version change — land in `device_events`, which keeps the table small and makes
+it readable as an actual timeline. That is also why SQLite is the right backing
+store here rather than a time-series database. All SQL is vanilla and confined
+to `internal/store`, so moving to Postgres later is a driver swap.
+
+## Layout
+
+```
+cmd/server, cmd/agent      entry points
+internal/proto             agent ↔ server wire contract
+internal/store             persistence; all SQL lives here
+internal/server            HTTP API, web UI (embedded templates + assets)
+internal/agent             check-in loop, identity, script execution
+```
+
+Four pages: **Dashboard** (fleet state), **Scripts** (write and dispatch),
+**Runs** (history and output), **Deployment** (installers and downloads).
+
+The UI is server-rendered Go templates plus vanilla JS — no Node, no build step.
+Everything is embedded in the binary with `go:embed`.
+
+## Configuration
+
+Server flags (each also reads an env var):
+
+| Flag | Env | Default | Purpose |
+|---|---|---|---|
+| `-addr` | `MONITORRR_ADDR` | `:8080` | Listen address |
+| `-db` | `MONITORRR_DB` | `monitorrr.db` | SQLite file |
+| `-dist` | `MONITORRR_DIST` | `dist` | Where agent binaries are served from |
+| `-admin-password` | `MONITORRR_ADMIN_PASSWORD` | *(none)* | Basic auth for UI and admin API |
+| `-public-url` | `MONITORRR_PUBLIC_URL` | *(inferred)* | Base URL shown in install commands |
+| `-tls-cert` / `-tls-key` | `MONITORRR_TLS_*` | *(none)* | Enable HTTPS directly |
+
+Agent flags: `-server`, `-enroll-token`, `-state`, `-insecure`, `-once`, `-debug`.
+
+## Security notes
+
+- Devices authenticate with a per-device token issued at enrollment; only its
+  SHA-256 hash is stored. The enrollment token is a separate shared secret and
+  can be rotated without disturbing enrolled devices.
+- `/install.sh` and `/download/*` authenticate with the enrollment token
+  (`?token=`) rather than the admin password: a machine being provisioned has
+  the token but no business holding admin credentials, and anyone with the token
+  can enroll anyway, so the trust level is unchanged.
+- The identity file is written `0600` via a temp file and rename.
+- **Defaults are lab defaults.** With no `-admin-password` the UI is open, and
+  without TLS the agent tokens cross the network in clear text. The server warns
+  about both at startup. Set a password and terminate TLS before this is
+  reachable from anywhere untrusted.
+- **Remote execution is a serious trust boundary.** Scripts run as whatever the
+  agent runs as — root under systemd, SYSTEM under the Windows task. Anyone who
+  can reach the admin UI can execute arbitrary code on every enrolled machine,
+  so `-admin-password` stops being optional the moment this leaves an isolated
+  network. Every save and dispatch is logged with who, what (name + SHA-256),
+  and where.

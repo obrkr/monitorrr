@@ -1,0 +1,191 @@
+{{define "deployment.html"}}
+{{template "head" .}}
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Enrollment</h2>
+    <span class="muted">agents present this token once, then use their own identity</span>
+  </div>
+  <div class="field-grid">
+    <label>Server URL</label>
+    <div class="field">
+      <code id="server-url">{{.ServerURL}}</code>
+      <button class="ghost" data-copy="#server-url">Copy</button>
+    </div>
+
+    <label>Enrollment token</label>
+    <div class="field">
+      <code id="enroll-token" class="masked">{{.EnrollToken}}</code>
+      <button class="ghost" id="reveal-token">Reveal</button>
+      <button class="ghost" data-copy="#enroll-token">Copy</button>
+      <button class="ghost danger" id="rotate-token">Rotate</button>
+    </div>
+
+    <label>Check-in interval</label>
+    <div class="field"><code>{{.Interval}} seconds</code></div>
+  </div>
+  <p class="note">
+    Rotating the token blocks <em>new</em> enrollments with the old value. Devices
+    already enrolled keep working — they authenticate with a per-device token
+    issued at enrollment, not with this one.
+  </p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Agent downloads</h2>
+    <span class="muted">one codebase, cross-compiled — no runtime needed on the endpoint</span>
+  </div>
+  {{if .Builds}}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Platform</th><th>File</th><th>Size</th><th>Built</th><th></th></tr>
+      </thead>
+      <tbody>
+        {{range .Builds}}
+        <tr>
+          <td><span class="os-badge os-{{.OS}}">{{.Label}}</span></td>
+          <td><code>{{.Name}}</code></td>
+          <td class="muted">{{.SizeMB}}</td>
+          <td class="muted">{{.Modified}}</td>
+          <td><a class="btn" href="/download/{{.Name}}?token={{$.EnrollToken}}">Download</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty-state">
+    <p>No agent binaries found in <code>{{.DistDir}}</code>.</p>
+    <p>Build them with:</p>
+    <pre><code>make build-all</code></pre>
+    <p class="muted">This cross-compiles every supported target from a single machine — no per-OS build host required.</p>
+  </div>
+  {{end}}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Install</h2>
+    <span class="muted">run in the foreground first to confirm check-in, then install as a service</span>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="linux" role="tab">Linux</button>
+    <button class="tab" data-tab="macos" role="tab">macOS</button>
+    <button class="tab" data-tab="windows" role="tab">Windows</button>
+  </div>
+
+  <div class="tab-panel active" data-panel="linux">
+    <h3>Recommended — one line</h3>
+<pre><code>curl -fsSL "{{.ServerURL}}/install.sh?token={{.EnrollToken}}" | sudo sh</code></pre>
+    <p class="muted">
+      Detects whether the machine is amd64 or arm64, downloads the matching
+      build, installs to <code>/usr/local/bin</code>, and registers a systemd
+      service. Add <code>--no-service</code> to skip the service, or
+      <code>--prefix DIR</code> to install elsewhere. Pipe to
+      <code>sh -s -- --no-service</code> to pass flags through the pipe.
+    </p>
+
+    <h3>Manual — 1. download and run</h3>
+<pre><code>arch=$(uname -m); case $arch in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+curl -fsSL -o monitorrr-agent "{{.ServerURL}}/download/monitorrr-agent-linux-$arch?token={{.EnrollToken}}"
+chmod +x monitorrr-agent
+sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
+    <p class="muted">
+      The <code>uname -m</code> line matters: an Ubuntu VM on an Apple Silicon
+      host is arm64, and running an amd64 binary there fails with
+      <code>cannot execute binary file</code>.
+    </p>
+
+    <h3>Manual — 2. install as a systemd service</h3>
+<pre><code>sudo install -m 0755 monitorrr-agent /usr/local/bin/monitorrr-agent
+sudo tee /etc/systemd/system/monitorrr-agent.service &gt;/dev/null &lt;&lt;'EOF'
+[Unit]
+Description=monitorrr agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now monitorrr-agent
+systemctl status monitorrr-agent</code></pre>
+  </div>
+
+  <div class="tab-panel" data-panel="macos">
+    <h3>Recommended — one line</h3>
+<pre><code>curl -fsSL "{{.ServerURL}}/install.sh?token={{.EnrollToken}}" | sudo sh</code></pre>
+    <p class="muted">
+      Same installer as Linux: it picks Apple Silicon or Intel automatically,
+      clears the Gatekeeper quarantine flag, and registers a launchd daemon.
+    </p>
+
+    <h3>Manual — 1. download and run</h3>
+<pre><code>arch=$(uname -m)  # arm64 on Apple Silicon, x86_64 → amd64 on Intel
+[ "$arch" = "x86_64" ] &amp;&amp; arch=amd64
+curl -fsSL -o monitorrr-agent "{{.ServerURL}}/download/monitorrr-agent-darwin-$arch?token={{.EnrollToken}}"
+chmod +x monitorrr-agent
+xattr -d com.apple.quarantine monitorrr-agent 2&gt;/dev/null || true
+sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
+    <p class="muted">The <code>xattr</code> line clears Gatekeeper's quarantine flag on an unsigned binary fetched over the network.</p>
+
+    <h3>Manual — 2. install as a launchd daemon</h3>
+<pre><code>sudo install -m 0755 monitorrr-agent /usr/local/bin/monitorrr-agent
+sudo tee /Library/LaunchDaemons/io.monitorrr.agent.plist &gt;/dev/null &lt;&lt;'EOF'
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;io.monitorrr.agent&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;
+  &lt;array&gt;
+    &lt;string&gt;/usr/local/bin/monitorrr-agent&lt;/string&gt;
+    &lt;string&gt;-server&lt;/string&gt;&lt;string&gt;{{.ServerURL}}&lt;/string&gt;
+    &lt;string&gt;-enroll-token&lt;/string&gt;&lt;string&gt;{{.EnrollToken}}&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;
+  &lt;key&gt;KeepAlive&lt;/key&gt;&lt;true/&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;
+EOF
+sudo launchctl load -w /Library/LaunchDaemons/io.monitorrr.agent.plist</code></pre>
+  </div>
+
+  <div class="tab-panel" data-panel="windows">
+    <h3>1. Download and run</h3>
+<pre><code>$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+Invoke-WebRequest -Uri "{{.ServerURL}}/download/monitorrr-agent-windows-$arch.exe?token={{.EnrollToken}}" -OutFile "monitorrr-agent.exe"
+.\monitorrr-agent.exe -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
+    <p class="muted">
+      The <code>$arch</code> line matters on Windows-on-ARM VMs. SmartScreen may
+      warn on an unsigned binary. Run PowerShell as Administrator so the agent
+      can write its identity to <code>C:\ProgramData\monitorrr</code>.
+    </p>
+
+    <h3>2. Install as a scheduled task at boot</h3>
+<pre><code>New-Item -ItemType Directory -Force -Path "C:\Program Files\monitorrr" | Out-Null
+Copy-Item .\monitorrr-agent.exe "C:\Program Files\monitorrr\monitorrr-agent.exe" -Force
+
+$action  = New-ScheduledTaskAction -Execute "C:\Program Files\monitorrr\monitorrr-agent.exe" `
+             -Argument '-server {{.ServerURL}} -enroll-token {{.EnrollToken}}'
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+
+Register-ScheduledTask -TaskName "monitorrr-agent" -Action $action -Trigger $trigger `
+  -Principal $principal -Settings $settings -Force
+Start-ScheduledTask -TaskName "monitorrr-agent"</code></pre>
+    <p class="muted">A scheduled task avoids pulling in a Windows service wrapper dependency. Swap it for a real service later if you want <code>sc.exe</code> control.</p>
+  </div>
+</section>
+
+{{template "foot" .}}
+{{end}}

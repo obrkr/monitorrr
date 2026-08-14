@@ -1,0 +1,10 @@
+# build output and agent binaries served from the Deployment page
+/dist/
+
+# local state
+*.db
+*.db-wal
+*.db-shm
+agent-state.json
+
+.DS_Store

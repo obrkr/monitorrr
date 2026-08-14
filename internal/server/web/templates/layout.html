@@ -1,0 +1,32 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>monitorrr · {{if eq .Page "deployment"}}Deployment{{else if eq .Page "scripts"}}Scripts{{else if eq .Page "runs"}}Runs{{else}}Dashboard{{end}}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%2334d399'/></svg>">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <span class="brand-name">monitorrr</span>
+  </div>
+  <nav>
+    <a href="/" class="{{if eq .Page "dashboard"}}active{{end}}">Dashboard</a>
+    <a href="/scripts" class="{{if eq .Page "scripts"}}active{{end}}">Scripts</a>
+    <a href="/runs" class="{{if eq .Page "runs"}}active{{end}}">Runs</a>
+    <a href="/deployment" class="{{if eq .Page "deployment"}}active{{end}}">Deployment</a>
+  </nav>
+  <div class="version">{{.Version}}</div>
+</header>
+<main>
+{{end}}
+
+{{define "foot"}}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}
