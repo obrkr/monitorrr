@@ -16,12 +16,12 @@ func TestRetireLifecycle(t *testing.T) {
 	st := newTestStore(t)
 
 	id := mustDevice(t, st, "vm-01", "linux")
-	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", []string{"10.0.0.5"}, nil); err != nil {
+	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", []string{"10.0.0.5"}, nil); err != nil {
 		t.Fatalf("checkin: %v", err)
 	}
 
 	// Before retirement, check-ins carry no retire instruction.
-	if _, retire, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", []string{"10.0.0.5"}, modernFeatures); err != nil || retire {
+	if _, retire, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", []string{"10.0.0.5"}, modernFeatures); err != nil || retire {
 		t.Fatalf("checkin before retire = (retire=%v, %v), want (false, nil)", retire, err)
 	}
 
@@ -42,7 +42,7 @@ func TestRetireLifecycle(t *testing.T) {
 	}
 
 	// The next check-in delivers the instruction.
-	_, retire, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", []string{"10.0.0.5"}, modernFeatures)
+	_, retire, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", []string{"10.0.0.5"}, modernFeatures)
 	if err != nil {
 		t.Fatalf("checkin after retire: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestRetiringDeviceIsNotSweptOffline(t *testing.T) {
 	st := newTestStore(t)
 
 	id := mustDevice(t, st, "vm-01", "linux")
-	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", []string{"10.0.0.5"}, nil); err != nil {
+	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", []string{"10.0.0.5"}, nil); err != nil {
 		t.Fatalf("checkin: %v", err)
 	}
 	if err := st.RetireDevice(ctx, id); err != nil {
@@ -206,10 +206,10 @@ func TestStuckRetirementIsDetectable(t *testing.T) {
 	current := mustDevice(t, st, "new-agent", "linux")
 
 	// An old agent sends no feature list at all.
-	if _, _, err := st.Checkin(ctx, old, "old-agent", "0.1.0", "10.0.0.5", nil, nil); err != nil {
+	if _, _, err := st.Checkin(ctx, old, "old-agent", "0.1.0", "10.0.0.5", "", nil, nil); err != nil {
 		t.Fatalf("checkin: %v", err)
 	}
-	if _, _, err := st.Checkin(ctx, current, "new-agent", "0.2.0", "10.0.0.6", nil, modernFeatures); err != nil {
+	if _, _, err := st.Checkin(ctx, current, "new-agent", "0.2.0", "10.0.0.6", "", nil, modernFeatures); err != nil {
 		t.Fatalf("checkin: %v", err)
 	}
 
@@ -243,7 +243,7 @@ func TestStuckRetirementIsDetectable(t *testing.T) {
 
 	// Each subsequent heartbeat is evidence the agent is alive and ignoring us.
 	for i := 1; i <= 3; i++ {
-		if _, _, err := st.Checkin(ctx, old, "old-agent", "0.1.0", "10.0.0.5", nil, nil); err != nil {
+		if _, _, err := st.Checkin(ctx, old, "old-agent", "0.1.0", "10.0.0.5", "", nil, nil); err != nil {
 			t.Fatalf("checkin %d: %v", i, err)
 		}
 		if got := byName()["old-agent"].RetireCheckins; got != i {
@@ -284,7 +284,7 @@ func TestMigrationAddsRetiredAtColumn(t *testing.T) {
 	defer st2.Close()
 
 	id := mustDevice(t, st2, "vm-01", "linux")
-	if _, _, err := st2.Checkin(context.Background(), id, "vm-01", "0.1.0", "10.0.0.5", nil, nil); err != nil {
+	if _, _, err := st2.Checkin(context.Background(), id, "vm-01", "0.1.0", "10.0.0.5", "", nil, nil); err != nil {
 		t.Errorf("checkin after migration: %v", err)
 	}
 }

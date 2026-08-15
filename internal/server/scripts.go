@@ -162,6 +162,94 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 
 // --- pages ---
 
+// handleGetDevice returns everything the device page needs in one request:
+// the device, its timeline, its run history, and the scripts that can actually
+// run on it.
+func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	device, err := s.st.GetDevice(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, proto.Error{Error: "no such device"})
+			return
+		}
+		s.fail(w, http.StatusInternalServerError, "could not read device", err)
+		return
+	}
+
+	events, err := s.st.DeviceEvents(r.Context(), id, 50)
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "could not read device timeline", err)
+		return
+	}
+	jobs, err := s.st.DeviceJobs(r.Context(), id, 50)
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "could not read device runs", err)
+		return
+	}
+	scripts, err := s.st.ListScripts(r.Context())
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "could not list scripts", err)
+		return
+	}
+
+	// Filter here rather than in the browser: which scripts can run on this OS
+	// is a rule the server owns, and Dispatch enforces it anyway.
+	runnable := []store.Script{}
+	for _, sc := range scripts {
+		if store.InterpreterSupports(sc.Interpreter, device.OS) {
+			runnable = append(runnable, sc)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"device":           device,
+		"events":           events,
+		"jobs":             jobs,
+		"runnable_scripts": runnable,
+		"supports_retire":  device.SupportsRetire(),
+	})
+}
+
+// handleDeviceDispatch runs one script on this one device. It is the same
+// operation as dispatching from the scripts side, addressed the other way
+// round, which is how the device page needs it.
+func (s *Server) handleDeviceDispatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ScriptID string `json:"script_id"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	deviceID := r.PathValue("id")
+	by := adminUser(r)
+	jobs, err := s.st.Dispatch(r.Context(), body.ScriptID, []string{deviceID}, by)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, proto.Error{Error: "no such script or device"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, proto.Error{Error: err.Error()})
+		return
+	}
+
+	for _, j := range jobs {
+		s.log.Info("job queued", "job", j.ID, "script", j.ScriptName, "sha256", j.ScriptSHA256,
+			"device", j.DeviceHostname, "by", by)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "queued": len(jobs)})
+}
+
+func (s *Server) handleDevicePage(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "device.html", map[string]any{
+		"Page":     "devices",
+		"Version":  Version,
+		"DeviceID": r.PathValue("id"),
+	})
+}
+
 func (s *Server) handleScriptsPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "scripts.html", map[string]any{"Page": "scripts", "Version": Version})
 }

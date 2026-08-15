@@ -51,6 +51,7 @@ type Config struct {
 	StatePath   string // defaults to a per-OS system path
 	Insecure    bool   // skip TLS verification (self-signed lab certs)
 	Once        bool   // single check-in, then exit — useful for testing
+	NoPublicIP  bool   // do not resolve the public address via a third party
 }
 
 // state is the durable identity persisted between runs.
@@ -77,6 +78,10 @@ type Agent struct {
 	// seen guards against executing the same job twice if a check-in response
 	// is somehow redelivered.
 	seen map[string]bool
+
+	// The public address is cached between refreshes; see publicip.go.
+	cachedPublicIP  string
+	publicIPChecked time.Time
 }
 
 // New builds an Agent.
@@ -252,6 +257,7 @@ func (a *Agent) checkin(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		AgentVersion: FullVersion(),
 		LocalIPs:     localIPs(),
+		PublicIP:     a.publicIP(ctx),
 		Features:     proto.AgentFeatures,
 	}
 

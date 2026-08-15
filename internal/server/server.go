@@ -71,6 +71,9 @@ type Server struct {
 	shTmpl *texttemplate.Template
 	log    *slog.Logger
 	http   *http.Server
+	// lanAddr is this host's outbound address, resolved once at startup and
+	// used when a request arrives on loopback — see publicURL.
+	lanAddr string
 }
 
 // New builds a Server. The caller owns the store's lifetime.
@@ -83,7 +86,14 @@ func New(cfg Config, st *store.Store, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse installer template: %w", err)
 	}
-	s := &Server{cfg: cfg, st: st, tmpl: tmpl, shTmpl: shTmpl, log: log}
+	s := &Server{cfg: cfg, st: st, tmpl: tmpl, shTmpl: shTmpl, log: log, lanAddr: detectLANAddr()}
+	if s.lanAddr != "" {
+		log.Info("detected own network address", "addr", s.lanAddr,
+			"hint", "used in install commands when the dashboard is opened on localhost")
+	} else {
+		log.Warn("could not determine this host's network address; " +
+			"install commands may show localhost — pass -public-url to set it explicitly")
+	}
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           s.routes(),
@@ -125,6 +135,9 @@ func (s *Server) routes() http.Handler {
 	// Admin surface.
 	admin := http.NewServeMux()
 	admin.HandleFunc("GET /{$}", s.handleDashboard)
+	admin.HandleFunc("GET /devices/{id}", s.handleDevicePage)
+	admin.HandleFunc("GET /api/devices/{id}", s.handleGetDevice)
+	admin.HandleFunc("POST /api/devices/{id}/dispatch", s.handleDeviceDispatch)
 	admin.HandleFunc("GET /scripts", s.handleScriptsPage)
 	admin.HandleFunc("GET /runs", s.handleRunsPage)
 	admin.HandleFunc("GET /deployment", s.handleDeployment)
@@ -278,7 +291,7 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	interval, retire, err := s.st.Checkin(r.Context(), id, req.Hostname, req.AgentVersion,
-		clientIP(r), req.LocalIPs, req.Features)
+		clientIP(r), req.PublicIP, req.LocalIPs, req.Features)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeJSON(w, http.StatusUnauthorized, proto.Error{Error: "unknown device"})
@@ -620,10 +633,17 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 
 // publicURL is the base URL agents should be pointed at. An explicit
 // -public-url wins; otherwise it is inferred from the request.
+//
+// The subtlety is localhost. Install commands are copied from this page and run
+// on *other* machines, where "localhost" points back at themselves — so a
+// browser on the server host would otherwise produce commands that silently
+// fail everywhere else. When the request host is a loopback address, the
+// server's own LAN address is substituted instead.
 func (s *Server) publicURL(r *http.Request) string {
 	if s.cfg.PublicURL != "" {
 		return strings.TrimSuffix(s.cfg.PublicURL, "/")
 	}
+
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
@@ -631,7 +651,46 @@ func (s *Server) publicURL(r *http.Request) string {
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
 		scheme = proto
 	}
-	return fmt.Sprintf("%s://%s", scheme, r.Host)
+
+	host := r.Host
+	if hostname, port, err := net.SplitHostPort(host); err == nil {
+		if isLoopback(hostname) {
+			if lan := s.lanAddr; lan != "" {
+				host = net.JoinHostPort(lan, port)
+			}
+		}
+	} else if isLoopback(host) && s.lanAddr != "" {
+		host = s.lanAddr
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// detectLANAddr finds the address other machines on the network can reach this
+// server on. No packet is actually sent: opening a UDP socket toward a public
+// address makes the kernel pick the interface it would route through, which is
+// the outbound address we want, and works without enumerating interfaces or
+// guessing which of several is the real one.
+func detectLANAddr() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || addr.IP == nil || addr.IP.IsLoopback() {
+		return ""
+	}
+	return addr.IP.String()
 }
 
 // --- middleware and helpers ---

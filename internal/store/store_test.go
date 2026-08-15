@@ -59,7 +59,7 @@ func TestFirstCheckinDoesNotLogAddressChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
-	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", []string{"10.0.0.5"}, nil); err != nil {
+	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", []string{"10.0.0.5"}, nil); err != nil {
 		t.Fatalf("checkin: %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestCheckinRecordsOnlyRealChanges(t *testing.T) {
 	}
 	checkin := func(host, version, remote string, ips []string) {
 		t.Helper()
-		if _, _, err := st.Checkin(ctx, id, host, version, remote, ips, nil); err != nil {
+		if _, _, err := st.Checkin(ctx, id, host, version, remote, "", ips, nil); err != nil {
 			t.Fatalf("checkin: %v", err)
 		}
 	}
@@ -117,7 +117,7 @@ func TestSweepOfflineAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
-	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", []string{"10.0.0.5"}, nil); err != nil {
+	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", []string{"10.0.0.5"}, nil); err != nil {
 		t.Fatalf("checkin: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestSweepOfflineAndRecovery(t *testing.T) {
 	}
 
 	// Recovery: the next heartbeat flips it back and logs the transition.
-	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", []string{"10.0.0.5"}, nil); err != nil {
+	if _, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", []string{"10.0.0.5"}, nil); err != nil {
 		t.Fatalf("recovery checkin: %v", err)
 	}
 	got := kinds(t, st)
@@ -185,7 +185,7 @@ func TestIntervalSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
-	interval, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", nil, nil)
+	interval, _, err := st.Checkin(ctx, id, "vm-01", "0.1.0", "10.0.0.5", "", nil, nil)
 	if err != nil {
 		t.Fatalf("checkin: %v", err)
 	}

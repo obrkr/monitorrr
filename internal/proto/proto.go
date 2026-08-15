@@ -46,6 +46,11 @@ type CheckinRequest struct {
 	Arch         string   `json:"arch"`
 	AgentVersion string   `json:"agent_version"`
 	LocalIPs     []string `json:"local_ips"`
+	// PublicIP is the address the device appears as on the internet, resolved
+	// by the agent against an external service. The server cannot derive this
+	// itself: it only sees the source address of the connection, which is a
+	// private address whenever the agent is on the same network.
+	PublicIP string `json:"public_ip,omitempty"`
 	// Features is absent on agents predating capability advertisement, which is
 	// itself the signal that they are old.
 	Features []string `json:"features,omitempty"`

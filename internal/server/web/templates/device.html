@@ -1,0 +1,60 @@
+{{define "device.html"}}
+{{template "head" .}}
+
+<div class="crumb"><a href="/">← All devices</a></div>
+
+<section class="panel" id="device-panel" data-device-id="{{.DeviceID}}">
+  <div class="panel-head">
+    <h2 id="device-hostname">Loading…</h2>
+    <span id="device-status"></span>
+  </div>
+  <div class="field-grid" id="device-facts"></div>
+  <div class="editor-actions" id="device-actions"></div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Run a script</h2>
+    <span class="muted">only scripts this machine's OS can execute are listed</span>
+  </div>
+  <div class="run-row">
+    <select id="run-script"><option value="">Loading…</option></select>
+    <button type="button" id="run-now" class="primary" disabled>Run</button>
+    <a class="btn ghost" href="/scripts">Manage scripts</a>
+  </div>
+  <p class="note" id="run-note">Runs as root or SYSTEM on this machine.</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Runs on this device</h2>
+    <span class="muted">select a run to see its output</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>State</th><th>Script</th><th>Exit</th><th>Duration</th><th>By</th><th>When</th></tr>
+      </thead>
+      <tbody id="device-jobs"><tr class="empty"><td colspan="6">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel" id="job-detail" hidden>
+  <div class="panel-head">
+    <h2 id="detail-title">Run detail</h2>
+    <button class="ghost" id="close-detail">Close</button>
+  </div>
+  <div id="detail-body"></div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Timeline</h2>
+    <span class="muted">state changes only — heartbeats are not logged</span>
+  </div>
+  <ul class="events" id="device-events"><li class="muted pad">Loading…</li></ul>
+</section>
+
+{{template "foot" .}}
+{{end}}

@@ -43,7 +43,11 @@ CREATE TABLE IF NOT EXISTS devices (
   features         TEXT NOT NULL DEFAULT '',
   -- Check-ins received since retirement was requested. A climbing count means
   -- the agent is alive and ignoring the instruction.
-  retire_checkins  INTEGER NOT NULL DEFAULT 0
+  retire_checkins  INTEGER NOT NULL DEFAULT 0,
+  -- The address the device appears as on the internet, reported by the agent.
+  -- Distinct from remote_ip, which is only the source address of the
+  -- connection and is private whenever the agent shares our network.
+  public_ip        TEXT NOT NULL DEFAULT ''
 );
 
 -- Append-only history. We deliberately do NOT write a row per heartbeat: only
@@ -138,6 +142,7 @@ type Device struct {
 	AgentVersion string    `json:"agent_version"`
 	LocalIPs     []string  `json:"local_ips"`
 	RemoteIP     string    `json:"remote_ip"`
+	PublicIP     string    `json:"public_ip"`
 	Interval     int       `json:"interval_seconds"`
 	Status       string    `json:"status"`
 	EnrolledAt   time.Time `json:"enrolled_at"`
@@ -215,6 +220,7 @@ func (s *Store) migrate() error {
 		{"devices", "retired_at", "ALTER TABLE devices ADD COLUMN retired_at INTEGER"},
 		{"devices", "features", "ALTER TABLE devices ADD COLUMN features TEXT NOT NULL DEFAULT ''"},
 		{"devices", "retire_checkins", "ALTER TABLE devices ADD COLUMN retire_checkins INTEGER NOT NULL DEFAULT 0"},
+		{"devices", "public_ip", "ALTER TABLE devices ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, c := range columns {
 		var n int
@@ -379,7 +385,7 @@ func (s *Store) Authenticate(ctx context.Context, id, token string) error {
 // Checkin records a heartbeat and returns the interval the agent should use,
 // plus whether this device has been retired and should uninstall itself.
 // Only genuine changes are written to the event timeline.
-func (s *Store) Checkin(ctx context.Context, id, hostname, version, remoteIP string, localIPs, features []string) (interval int, retire bool, err error) {
+func (s *Store) Checkin(ctx context.Context, id, hostname, version, remoteIP, publicIP string, localIPs, features []string) (interval int, retire bool, err error) {
 	now := time.Now().Unix()
 	ips := strings.Join(localIPs, ",")
 	feat := strings.Join(features, ",")
@@ -422,9 +428,10 @@ func (s *Store) Checkin(ctx context.Context, id, hostname, version, remoteIP str
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE devices SET hostname = ?, agent_version = ?, local_ips = ?, remote_ip = ?,
+		 public_ip = COALESCE(NULLIF(?, ''), public_ip),
 		 status = ?, last_seen = ?, features = ?, retire_checkins = retire_checkins + ?
 		 WHERE id = ?`,
-		hostname, version, ips, remoteIP, status, now, feat, retireIncrement, id,
+		hostname, version, ips, remoteIP, publicIP, status, now, feat, retireIncrement, id,
 	); err != nil {
 		return 0, false, fmt.Errorf("update device: %w", err)
 	}
@@ -576,7 +583,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, hostname, os, arch, agent_version, local_ips, remote_ip,
+		`SELECT id, hostname, os, arch, agent_version, local_ips, remote_ip, public_ip,
 		        interval_override, status, enrolled_at, last_seen, retired_at,
 		        features, retire_checkins
 		 FROM devices ORDER BY last_seen DESC`)
@@ -595,7 +602,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
 			enrolled, lastSeen int64
 		)
 		if err := rows.Scan(&d.ID, &d.Hostname, &d.OS, &d.Arch, &d.AgentVersion, &ips,
-			&d.RemoteIP, &override, &d.Status, &enrolled, &lastSeen, &retired,
+			&d.RemoteIP, &d.PublicIP, &override, &d.Status, &enrolled, &lastSeen, &retired,
 			&feat, &d.RetireCheckins); err != nil {
 			return nil, fmt.Errorf("scan device: %w", err)
 		}

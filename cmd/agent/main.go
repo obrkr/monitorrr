@@ -33,6 +33,7 @@ func run() error {
 	flag.StringVar(&cfg.StatePath, "state", os.Getenv("MONITORRR_STATE"), "identity file path (default is per-OS system location)")
 	flag.BoolVar(&cfg.Insecure, "insecure", false, "skip TLS certificate verification (self-signed lab certificates)")
 	flag.BoolVar(&cfg.Once, "once", false, "check in once and exit")
+	flag.BoolVar(&cfg.NoPublicIP, "no-public-ip", false, "do not resolve this machine's public address via an external service")
 	flag.BoolVar(&debug, "debug", false, "verbose logging")
 	flag.BoolVar(&version, "version", false, "print version and exit")
 	flag.Parse()

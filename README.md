@@ -2,8 +2,7 @@
 
 A lightweight endpoint visibility tool for a home lab — a very small take on the
 Nexthink idea. Agents check in on a schedule, the dashboard shows who is
-reporting, and (from milestone 2) you can push a shell or PowerShell script to
-selected machines.
+reporting, and you can push a shell or PowerShell script to any of them.
 
 Two static binaries, one SQLite file, no runtime dependencies on either side.
 
@@ -13,7 +12,7 @@ Two static binaries, one SQLite file, no runtime dependencies on either side.
 
 - **Cross-platform agent** — Windows, macOS, Linux (amd64 + arm64) from one codebase
 - **Online / offline state** with last-seen timestamps
-- **Addresses** — public source address plus the device's own interfaces
+- **Addresses** — the device's public internet address plus its own interfaces
 - **Configurable check-in interval**, changed centrally and adopted fleet-wide
 - **Dashboard** — live device table and an activity timeline
 - **Deployment panel** — agent downloads, enrollment token, per-OS install steps
@@ -22,7 +21,7 @@ Two static binaries, one SQLite file, no runtime dependencies on either side.
 
 - **Scripts panel** — write and store `sh` and `powershell` scripts, each with
   its own timeout
-- **Explicit dispatch** — pick devices and run; nothing executes on its own
+- **Explicit dispatch** — run a script from a device's page; nothing executes on its own
 - **Runs panel** — state, exit code, duration, stdout/stderr, and the exact
   script body that was sent
 - **Compatibility enforced** — a PowerShell script cannot be queued against a
@@ -66,10 +65,33 @@ agent                                server
   │   ◄── agent_id + agent_token
   │
   ├── POST /v1/checkin (every N s) ─► update last_seen, record any transitions
-  │   ◄── {interval, jobs[]}          piggybacked control data
+  │   ◄── {interval, jobs[], retire}  piggybacked control data
   │
   └── (sweeper marks a device offline after 3 missed check-ins)
 ```
+
+### Addresses
+
+Two different addresses, for two different questions:
+
+- **Public IP** — what the machine looks like from the internet. The agent
+  resolves this itself against an external service (`ifconfig.me` and two
+  fallbacks), caching for 30 minutes: a home lab's public address changes
+  rarely, and this is an outbound call to a third party from every endpoint.
+  Pass `-no-public-ip` to the agent to disable it.
+- **Seen from** — the source address of the agent's connection, which the server
+  observes directly. On a lab LAN this is a private address, and it is the same
+  for every device behind one NAT.
+
+The server cannot derive the first from the second, which is why the agent
+reports it rather than the server inferring it.
+
+The server also resolves **its own** address at startup, by opening a UDP socket
+towards a public address and reading back which interface the kernel chose (no
+packet is sent). That address is substituted into install commands whenever the
+dashboard is opened on `localhost` — otherwise the commands you copy would point
+each target machine back at itself. `-public-url` overrides it for a reverse
+proxy or a DNS name.
 
 ### Retire vs delete
 
@@ -140,8 +162,12 @@ internal/server            HTTP API, web UI (embedded templates + assets)
 internal/agent             check-in loop, identity, script execution
 ```
 
-Four pages: **Dashboard** (fleet state), **Scripts** (write and dispatch),
+Five pages: **Dashboard** (fleet state; a row opens the machine), **Device**
+(facts, actions, run a script, timeline), **Scripts** (authoring only),
 **Runs** (history and output), **Deployment** (installers and downloads).
+
+Actions belong to a device, not to a list. Retire, delete, and dispatch all live
+on the device page; the scripts page is purely for writing and storing scripts.
 
 The UI is server-rendered Go templates plus vanilla JS — no Node, no build step.
 Everything is embedded in the binary with `go:embed`.

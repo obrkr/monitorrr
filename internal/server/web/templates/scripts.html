@@ -53,24 +53,10 @@
   </div>
 </section>
 
-<section class="panel">
-  <div class="panel-head">
-    <h2>Run on devices</h2>
-    <span class="muted" id="dispatch-note">save or select a script first</span>
-  </div>
-  <div class="picker-toolbar">
-    <button type="button" id="select-all" class="ghost">Select all compatible</button>
-    <button type="button" id="select-none" class="ghost">Clear</button>
-    <span class="muted" id="selection-count">0 selected</span>
-  </div>
-  <div class="device-picker" id="device-picker">
-    <p class="muted pad">Loading devices…</p>
-  </div>
-  <div class="editor-actions">
-    <button type="button" id="run-btn" class="primary" disabled>Run on selected</button>
-    <span class="muted">Dispatch is explicit — nothing runs on its own. Results appear under <a href="/runs">Runs</a>.</span>
-  </div>
-</section>
+<p class="note">
+  Scripts are managed here and run from a device's page. Open a device from the
+  <a href="/">dashboard</a> to dispatch one.
+</p>
 
 {{template "foot" .}}
 {{end}}
