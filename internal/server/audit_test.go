@@ -208,3 +208,67 @@ func TestDisplaySettings(t *testing.T) {
 		t.Error("an unknown theme was accepted")
 	}
 }
+
+// A factory reset must leave nothing behind, and must genuinely return the
+// server to first-run rather than to a half-configured state that neither
+// serves the console nor offers setup.
+func TestFactoryResetReturnsToFirstRun(t *testing.T) {
+	ctx := t.Context()
+	srv, st := testServer(t)
+	admin := signIn(t, srv, st, "ollie", store.RoleAdmin)
+	signIn(t, srv, st, "viewer", store.RoleReadOnly)
+
+	// Give it something to lose.
+	do(srv, http.MethodPost, "/api/scripts/starter", admin)
+	do(srv, http.MethodPost, "/api/settings/rotate-token", admin)
+	if _, err := st.CreateUser(ctx, "third", "correcthorse", store.RoleAdmin); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	oldToken, _ := st.EnrollToken(ctx)
+
+	if rec := do(srv, http.MethodPost, "/api/admin/factory-reset", admin); rec.Code != http.StatusBadRequest {
+		t.Fatalf("factory reset without confirmation = %d, want 400", rec.Code)
+	}
+	// The wrong word — the one that confirms the lesser reset — must not do it.
+	if rec := postAs(srv, admin, "/api/admin/factory-reset", `{"confirm":"RESET"}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("factory reset confirmed with RESET = %d, want 400", rec.Code)
+	}
+
+	rec := postAs(srv, admin, "/api/admin/factory-reset", `{"confirm":"FACTORY RESET"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("factory reset = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	if has, _ := st.HasUsers(ctx); has {
+		t.Error("accounts survived a factory reset")
+	}
+	if n, _ := st.AuditCount(ctx); n != 0 {
+		t.Errorf("%d audit entries survived a factory reset", n)
+	}
+	if scripts, _ := st.ListScripts(ctx); len(scripts) != 0 {
+		t.Errorf("%d scripts survived a factory reset", len(scripts))
+	}
+
+	// Settings are cleared too, but the instance must still be usable: an
+	// enrollment token and interval are reissued rather than left empty.
+	newToken, err := st.EnrollToken(ctx)
+	if err != nil || newToken == "" {
+		t.Fatalf("enrollment token after reset = (%q, %v), want a fresh one", newToken, err)
+	}
+	if newToken == oldToken {
+		t.Error("the enrollment token survived a factory reset")
+	}
+	if interval, _ := st.DefaultCheckinInterval(ctx); interval != store.DefaultInterval {
+		t.Errorf("check-in interval = %d after reset, want the default %d", interval, store.DefaultInterval)
+	}
+
+	// And the console is back to first run for everyone, including whoever had
+	// just been signed in as an administrator.
+	if rec := do(srv, http.MethodGet, "/api/devices", admin); rec.Code != http.StatusUnauthorized {
+		t.Errorf("API with the old session after reset = %d, want 401", rec.Code)
+	}
+	if rec := do(srv, http.MethodGet, "/setup", nil); rec.Code != http.StatusOK {
+		t.Errorf("GET /setup after a factory reset = %d, want the setup page", rec.Code)
+	}
+}

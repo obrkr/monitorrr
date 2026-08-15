@@ -31,32 +31,24 @@ const EventCollect = "file_collected"
 
 // Collection is one request to pull a file off a device.
 type Collection struct {
-	ID             string     `json:"id"`
-	DeviceID       string     `json:"device_id"`
-	DeviceHostname string     `json:"device_hostname"`
-	Path           string     `json:"path"`
-	Filename       string     `json:"filename"`
-	State          string     `json:"state"`
-	Size           int64      `json:"size"`
-	Received       int64      `json:"received"`
-	SHA256         string     `json:"sha256,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Copied         bool       `json:"copied"`
-	CreatedBy      string     `json:"created_by"`
-	CreatedAt      time.Time  `json:"created_at"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-}
-
-// Progress reports how far a transfer has got, 0-100.
-func (c Collection) Progress() int {
-	if c.Size <= 0 {
-		return 0
-	}
-	if c.Received >= c.Size {
-		return 100
-	}
-	return int(c.Received * 100 / c.Size)
+	ID             string `json:"id"`
+	DeviceID       string `json:"device_id"`
+	DeviceHostname string `json:"device_hostname"`
+	Path           string `json:"path"`
+	Filename       string `json:"filename"`
+	State          string `json:"state"`
+	Size           int64  `json:"size"`
+	Received       int64  `json:"received"`
+	// Progress is how far the transfer has got, 0-100. Computed here rather
+	// than in the browser so there is one implementation of it.
+	Progress   int        `json:"progress"`
+	SHA256     string     `json:"sha256,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	Copied     bool       `json:"copied"`
+	CreatedBy  string     `json:"created_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
 // RequestCollection queues a file pull from a device.
@@ -340,6 +332,14 @@ func scanCollection(row scanner) (Collection, error) {
 		return Collection{}, err
 	}
 	c.Copied = copied != 0
+	switch {
+	case c.Size <= 0:
+		c.Progress = 0
+	case c.Received >= c.Size:
+		c.Progress = 100
+	default:
+		c.Progress = int(c.Received * 100 / c.Size)
+	}
 	c.CreatedAt = time.Unix(created, 0)
 	if finished.Valid {
 		t := time.Unix(finished.Int64, 0)

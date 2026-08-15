@@ -412,6 +412,7 @@ type ResetSummary struct {
 	Collections int `json:"collections"`
 	Payloads    int `json:"payloads"`
 	Events      int `json:"events"`
+	Accounts    int `json:"accounts"`
 }
 
 // ResetFleet empties everything about the fleet, keeping accounts.
@@ -456,6 +457,65 @@ func (s *Store) ResetFleet(ctx context.Context) (ResetSummary, error) {
 
 	if err := tx.Commit(); err != nil {
 		return ResetSummary{}, fmt.Errorf("commit reset: %w", err)
+	}
+	return summary, nil
+}
+
+// FactoryReset returns the instance to its first-run state: every device,
+// script, run, stored file, audit entry, account and setting is removed.
+//
+// Distinct from ResetFleet, which keeps accounts. This is for handing the
+// instance to someone else, or publishing it — after this the server has no
+// idea who anyone is, and the next visit is the setup page again.
+//
+// One transaction, so the instance either resets or does not. A half-reset
+// leaving accounts but no enrollment token, or settings but no users, would be
+// harder to recover from than either end state.
+func (s *Store) FactoryReset(ctx context.Context) (ResetSummary, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ResetSummary{}, fmt.Errorf("begin factory reset: %w", err)
+	}
+	defer tx.Rollback()
+
+	var summary ResetSummary
+	counts := []struct {
+		table string
+		into  *int
+	}{
+		{"devices", &summary.Devices},
+		{"scripts", &summary.Scripts},
+		{"jobs", &summary.Jobs},
+		{"collections", &summary.Collections},
+		{"payloads", &summary.Payloads},
+		{"device_events", &summary.Events},
+		{"users", &summary.Accounts},
+	}
+	for _, c := range counts {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+c.table).Scan(c.into); err != nil {
+			return ResetSummary{}, fmt.Errorf("count %s: %w", c.table, err)
+		}
+	}
+
+	// Order matters only for readability; foreign keys cascade either way.
+	tables := []string{
+		"jobs", "collections", "device_events", "devices", "scripts", "payloads",
+		"audit_log", "sessions", "users", "settings",
+	}
+	for _, table := range tables {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table); err != nil {
+			return ResetSummary{}, fmt.Errorf("clear %s: %w", table, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ResetSummary{}, fmt.Errorf("commit factory reset: %w", err)
+	}
+
+	// Settings were cleared with everything else, so the enrollment token and
+	// interval have to be reissued or the server would start with none.
+	if err := s.seed(); err != nil {
+		return ResetSummary{}, fmt.Errorf("reseed after factory reset: %w", err)
 	}
 	return summary, nil
 }

@@ -36,8 +36,11 @@ func auditf(r *http.Request, action, target, detail string) {
 	}
 }
 
-// auditSkip suppresses the entry for a request that changes nothing worth
-// recording.
+// auditSkip suppresses the entry for this request.
+//
+// Used by the factory reset, which empties the audit table as part of its work:
+// the middleware writes afterwards, so without this the one surviving entry
+// would be the reset itself, naming an account that no longer exists.
 func auditSkip(r *http.Request) {
 	if note, ok := r.Context().Value(auditKey).(*auditNote); ok {
 		note.skip = true

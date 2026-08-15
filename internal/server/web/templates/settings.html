@@ -93,7 +93,7 @@
 
   <div class="danger-item">
     <div>
-      <strong>Reset this instance</strong>
+      <strong>Reset the fleet</strong>
       <p class="muted">
         Deletes every device, script, run, uploaded file and collected file, and
         rotates the enrollment token so old agents cannot rejoin. Accounts are
@@ -101,7 +101,21 @@
         uninstalled: retire them first if that is what you want.
       </p>
     </div>
-    <button type="button" id="reset-instance" class="danger">Reset instance</button>
+    <button type="button" id="reset-instance" class="danger">Reset fleet</button>
+  </div>
+
+  <div class="danger-item">
+    <div>
+      <strong>Factory reset</strong>
+      <p class="muted">
+        Everything the fleet reset removes, <em>plus every account, the audit
+        log and all settings</em>. The instance returns to the state it shipped
+        in: you will be signed out, and the next visit asks you to create the
+        first administrator again. Agents are not uninstalled — retire them
+        first if you want the machines cleaned up too.
+      </p>
+    </div>
+    <button type="button" id="factory-reset" class="danger">Factory reset</button>
   </div>
 </section>
 

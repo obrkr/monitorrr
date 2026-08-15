@@ -43,24 +43,24 @@ func TestCollectionLifecycle(t *testing.T) {
 	if got.State != CollectTransferring || got.Size != 4096 {
 		t.Errorf("after probe: state=%q size=%d, want transferring/4096", got.State, got.Size)
 	}
-	if got.Progress() != 0 {
-		t.Errorf("progress = %d before any bytes, want 0", got.Progress())
+	if got.Progress != 0 {
+		t.Errorf("progress = %d before any bytes, want 0", got.Progress)
 	}
 
 	if err := st.UpdateCollectionProgress(ctx, c.ID, 1024); err != nil {
 		t.Fatalf("progress: %v", err)
 	}
 	got, _ = st.GetCollection(ctx, c.ID)
-	if got.Progress() != 25 {
-		t.Errorf("progress = %d at a quarter transferred, want 25", got.Progress())
+	if got.Progress != 25 {
+		t.Errorf("progress = %d at a quarter transferred, want 25", got.Progress)
 	}
 
 	if err := st.CompleteCollection(ctx, c.ID, device, "abc123", 4096); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	got, _ = st.GetCollection(ctx, c.ID)
-	if got.State != CollectDone || got.Progress() != 100 {
-		t.Errorf("after completion: state=%q progress=%d", got.State, got.Progress())
+	if got.State != CollectDone || got.Progress != 100 {
+		t.Errorf("after completion: state=%q progress=%d", got.State, got.Progress)
 	}
 	if got.ExpiresAt == nil {
 		t.Fatal("no expiry set — the file would be kept forever")

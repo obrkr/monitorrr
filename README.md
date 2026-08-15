@@ -1,36 +1,51 @@
 # monitorrr
 
-A lightweight endpoint visibility tool for a home lab — a very small take on the
-Nexthink idea. Agents check in on a schedule, the dashboard shows who is
-reporting, and you can push a shell or PowerShell script to any of them.
+![Vibe Coded](https://img.shields.io/badge/vibe-coded-ff5fa8?style=for-the-badge)
+![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-8a5cf6?style=for-the-badge)
+![Two Static Binaries](https://img.shields.io/badge/deploy-two%20static%20binaries-3b82f6?style=for-the-badge)
 
-Two static binaries, one SQLite file, no runtime dependencies on either side.
+A self-hosted **endpoint visibility and remote execution** tool for a home lab — a very small take on the Nexthink idea. Agents check in on a schedule, a dashboard shows who is reporting, and from a device's page you can run a script on it, push an installer and execute it, or pull a file back off it. One Go codebase builds static agents for Windows, macOS and Linux on amd64 and arm64; the server is a single binary with a SQLite file beside it.
+
+> **This project is fully vibe coded.** The protocol, the agent lifecycle, the self-update mechanism and the permission model were all built through conversational, AI-assisted development rather than a planned build. It has been verified with real agents on real machines — a 40 MB file collected byte-identical, an agent updating itself under a live supervisor, a retirement that genuinely uninstalls — but it executes arbitrary code as root and SYSTEM on every machine it touches. Read it yourself before pointing it at anything you care about.
+
+> **Built with Go and SQLite.** One external dependency: a pure-Go SQLite driver, so `CGO_ENABLED=0` produces a static binary for every target from one machine with no C toolchain. The UI is server-rendered templates and one vanilla JavaScript file, embedded in the binary with `go:embed`. No build step, no bundler, no framework and no CDN — a console that fails to load is a console you cannot use during an incident.
+
+---
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Accounts and roles](#accounts-and-roles)
+- [Running scripts](#running-scripts)
+- [Pushing a file and running it](#pushing-a-file-and-running-it)
+- [Collecting a file from a device](#collecting-a-file-from-a-device)
+- [Retiring and re-enrolling](#retiring-and-re-enrolling)
+- [Agent auto-update](#agent-auto-update)
+- [Audit trail](#audit-trail)
+- [Configuration](#configuration)
+- [Security notes](#security-notes)
+- [Project structure](#project-structure)
+- [How it's built](#how-its-built)
+
+---
 
 ## What it does
 
-**Monitoring (milestone 1)**
+- **Cross-platform agent** — Windows, macOS and Linux on amd64 and arm64, from one codebase, with no runtime to install on the endpoint.
+- **Heartbeat monitoring** — online/offline state, last seen, the device's public internet address and its own interfaces, on a check-in interval you set centrally.
+- **Remote execution** — write `sh` and PowerShell scripts, dispatch them to one device or a whole tag, and read back exit code, duration, stdout and stderr.
+- **Push a file and run it** — attach an installer to a script; the agent fetches it, verifies its digest, and hands the path to your script.
+- **Collect a file** — give a full path and the agent sends it back. Size first, then a transfer with progress. Locked files are copied aside and read from the copy.
+- **Tags and fleet dispatch** — label devices and run one script across everything matching, with incompatible machines reported rather than silently skipped.
+- **Starter library** — twelve read-only diagnostics, `sh` and PowerShell pairs, imported with one click.
+- **Self-updating agents** — the server serves a new build and agents replace themselves, verifying the replacement runs before installing it.
+- **Retirement** — a device uninstalls its own agent on request, as distinct from deleting its record.
+- **Accounts and roles** — admin or read-only, with a first-run setup flow.
+- **Audit trail** — every change made through the console, with who, what, when and from where.
 
-- **Cross-platform agent** — Windows, macOS, Linux (amd64 + arm64) from one codebase
-- **Online / offline state** with last-seen timestamps
-- **Addresses** — the device's public internet address plus its own interfaces
-- **Configurable check-in interval**, changed centrally and adopted fleet-wide
-- **Dashboard** — live device table and an activity timeline
-- **Deployment panel** — agent downloads, enrollment token, per-OS install steps
-
-**Remote execution (milestone 2)**
-
-- **Scripts panel** — write and store `sh` and `powershell` scripts, each with
-  its own timeout
-- **Explicit dispatch** — run a script from a device's page; nothing executes on its own
-- **Runs panel** — state, exit code, duration, stdout/stderr, and the exact
-  script body that was sent
-- **Compatibility enforced** — a PowerShell script cannot be queued against a
-  Linux box, and a mixed selection fails rather than half-running
-- **Push a file and run it** — attach an installer to a script; the agent
-  fetches it, verifies its digest, and passes the path as `$MONITORRR_PAYLOAD`
-- **Collect a file** — pull any path off a device, size reported first, kept 7 days
-- **Tags and fleet dispatch** — label devices and run one script across a group
-- **Starter library** — twelve read-only diagnostics, imported with one click
+---
 
 ## Quick start
 
@@ -39,114 +54,117 @@ make build-all          # server + agents for every platform
 make run                # serves on :8080
 ```
 
-Open <http://localhost:8080>. The enrollment token is printed at startup and
-shown on the Deployment page. On a Linux or macOS target:
+Open <http://localhost:8080>. The first visit asks you to create an administrator account; nothing else is reachable until you do.
+
+Then, on a Linux or macOS target:
 
 ```bash
 curl -fsSL "http://your-server:8080/install.sh?token=<token>" | sudo sh
 ```
 
-The installer detects the machine's OS and CPU architecture, fetches the
-matching build, installs to `/usr/local/bin`, and registers a systemd service or
-launchd daemon. Pass `--no-service` or `--prefix DIR` to change that (through a
-pipe: `| sudo sh -s -- --no-service`).
+The installer detects the machine's OS and CPU architecture, fetches the matching build, installs to `/usr/local/bin`, and registers a systemd service or launchd daemon. The token is on the Deployment page, which also carries per-OS manual instructions and a Windows scheduled-task setup.
 
-Architecture detection is the point: a Linux VM on an Apple Silicon host is
-arm64, and running an amd64 build there fails with `cannot execute binary file`.
-The Deployment page also lists every build for manual download, and carries
-copy-paste service definitions for systemd, launchd, and a Windows scheduled
-task.
+Architecture detection is the point rather than a nicety: a Linux VM on an Apple Silicon host is arm64, and running an amd64 build there fails with `cannot execute binary file`.
+
+---
 
 ## How it works
 
-Every exchange is agent-initiated outbound HTTPS, so agents work behind NAT with
-no inbound firewall rules or VPN. The check-in response doubles as the control
-channel — the server piggybacks interval changes (and later, queued jobs) onto
-the reply the agent is already waiting for.
+Every exchange is agent-initiated outbound HTTPS, so agents work behind NAT with no inbound firewall rules and no VPN. The check-in response doubles as the control channel — the server piggybacks everything it wants the agent to do onto the reply the agent is already waiting for.
 
 ```
-agent                                server
-  ├── POST /v1/enroll ──────────────► verify shared token, issue device identity
+agent                                 server
+  ├── POST /v1/enroll ───────────────► verify shared token, issue device identity
   │   ◄── agent_id + agent_token
   │
-  ├── POST /v1/checkin (every N s) ─► update last_seen, record any transitions
-  │   ◄── {interval, jobs[], retire}  piggybacked control data
+  ├── POST /v1/checkin (every N s) ──► update last_seen, record any transitions
+  │   ◄── {interval, jobs[],           piggybacked control data
+  │        collections[], retire,
+  │        update}
   │
   └── (sweeper marks a device offline after 3 missed check-ins)
 ```
 
-### Addresses
+**Heartbeats are not stored.** Writing a row per check-in would be ~1,400 rows per device per day to answer a question that one mutable `last_seen` column already answers. Only *transitions* — enrolled, online, offline, address change, version change — land in `device_events`, which keeps the table small and makes it readable as an actual timeline. That is also why SQLite is the right backing store here rather than a time-series database. All SQL is vanilla and confined to `internal/store`, so moving to Postgres later is a driver swap.
 
-Two different addresses, for two different questions:
+**Two different addresses, for two different questions.** The **public IP** is what the machine looks like from the internet, resolved by the agent itself against an external service and cached for 30 minutes. **Seen from** is the source address of its connection, which the server observes directly and which is private whenever the agent shares your network. The server cannot derive the first from the second, which is why the agent reports it.
 
-- **Public IP** — what the machine looks like from the internet. The agent
-  resolves this itself against an external service (`ifconfig.me` and two
-  fallbacks), caching for 30 minutes: a home lab's public address changes
-  rarely, and this is an outbound call to a third party from every endpoint.
-  Pass `-no-public-ip` to the agent to disable it.
-- **Seen from** — the source address of the agent's connection, which the server
-  observes directly. On a lab LAN this is a private address, and it is the same
-  for every device behind one NAT.
+---
 
-The server cannot derive the first from the second, which is why the agent
-reports it rather than the server inferring it.
+## Accounts and roles
 
-The server also resolves **its own** address at startup, by opening a UDP socket
-towards a public address and reading back which interface the kernel chose (no
-packet is sent). That address is substituted into install commands whenever the
-dashboard is opened on `localhost` — otherwise the commands you copy would point
-each target machine back at itself. `-public-url` overrides it for a reverse
-proxy or a DNS name.
+On first launch the server has no accounts and serves nothing but a setup page. Further accounts are added under Settings, in one of two roles:
 
-### Retire vs delete
+| | Admin | Read-only |
+|---|---|---|
+| View devices, runs, scripts, collected files | yes | yes |
+| Run scripts, collect files, retire devices | yes | no |
+| Manage scripts, files, tags, settings | yes | no |
+| Manage accounts, read the audit log | yes | not even visible |
 
-Two different operations that are easy to confuse, so the dashboard names them
-apart:
+The role rule is one line in the middleware: **read-only accounts may issue GET and HEAD, nothing else.** Every mutation is a POST, PATCH or DELETE, so there is no list of protected endpoints to keep in step with the routes — a new mutating endpoint is restricted the moment it is added, rather than the moment someone remembers to add it to a list.
+
+Passwords are PBKDF2-HMAC-SHA256 at 600,000 iterations with a per-user salt, from the standard library. A login for an account that does not exist hashes anyway before failing, so response timing cannot be used to enumerate accounts. The last administrator cannot be deleted or demoted.
+
+Settings also carries two destructive actions, each requiring a different word to be typed: **reset the fleet**, which clears devices, scripts, runs and stored files but keeps accounts; and **factory reset**, which additionally removes every account, the audit log and all settings, returning the instance to first run.
+
+---
+
+## Running scripts
+
+Scripts are written under **Scripts** and dispatched from a device's page, or across a tag from the dashboard. A job is `queued` when dispatched, `running` when an agent collects it on a check-in, and `done` when the result is posted back. A sweeper marks it `lost` if the agent never reports.
+
+Details that matter in practice:
+
+- Jobs run on their own goroutine in the agent, so a five-minute script never delays heartbeats and makes the device look offline.
+- Scripts execute in their own **process group**, and a timeout kills the group. Killing only the shell leaves `sleep 60` running, and because that grandchild inherits the output pipe, the agent would block until it finished anyway.
+- The agent verifies the script's SHA-256 before writing it to disk.
+- A non-zero exit is a normal result, not an execution failure. `error` is reserved for "could not run it at all" — timeout, missing interpreter, checksum mismatch.
+- Each job snapshots the script body and hash, so editing or deleting a script never rewrites what the audit trail says already ran.
+- Output is capped at 64 KB per stream, at the agent and again at the store.
+
+Dispatching to a **named device** is strict: an incompatible one is an error. Dispatching to a **group** skips incompatible machines and reports them, because skipping a Windows box for a shell script is expected across a mixed fleet — but a fleet run must never be quietly narrower than it looked.
+
+---
+
+## Pushing a file and running it
+
+Upload a file under Scripts, attach it to a script, and dispatch as usual. The agent downloads it, verifies the digest, makes it executable, and passes the path as `$MONITORRR_PAYLOAD` (`$env:MONITORRR_PAYLOAD` on Windows). The file is deleted from the device when the script finishes.
+
+Bytes live on disk beside the database and are streamed in both directions. A pushed installer is routinely hundreds of megabytes, and buffering one would put the server at the mercy of whatever is uploaded and risk the OOM reaper on a small endpoint. Serving is authorised per job, not per payload: a device may only fetch the file for work actually dispatched to it.
+
+---
+
+## Collecting a file from a device
+
+A full path typed on the device page pulls that file back. The agent reports the **size first**, before any bytes move — asking for a 40 GB VM image by mistake should be obvious from the dashboard, not discovered an hour later. The transfer then streams with a live progress bar.
+
+A file that cannot be opened directly is **copied aside and read from the copy**, which is how a locked or in-use file becomes collectable; the copy is removed afterwards. That fallback cannot fix everything, so the failure messages distinguish the two cases: a permissions failure is fixed by how the agent is installed, a lock is not.
+
+Collected files are kept for **7 days**, then deleted. The record survives the file — knowing something was pulled, by whom, and that it has since been removed is the point of an audit trail — and downloading an expired collection returns 410 with that explanation rather than a bare 404.
+
+---
+
+## Retiring and re-enrolling
+
+Deleting a device and retiring it are different operations, so the console names them apart:
 
 | | Delete | Retire |
 |---|---|---|
 | Server record | removed, with all history | kept, marked retired |
 | Agent on the machine | untouched, keeps running | uninstalls itself |
-| Next check-in | 401 → re-enrolls as a new device | receives retire, tears down, exits |
+| Next check-in | 401 → re-enrols as a new device | receives retire, tears down, exits |
 | Use it for | resetting a device's identity | decommissioning a machine |
 
-Retirement is a request, not an instant state. The device shows **Retiring…**
-until its agent next checks in, so a machine that is powered off is not silently
-forgotten — it retires whenever it next comes back. Queued jobs are cancelled on
-request, and no new ones can be aimed at it.
+Teardown runs in a **detached helper process**, not inline. Stopping your own service from inside it is a race you cannot win: systemd would kill the agent partway through its own cleanup, and Windows refuses to delete a running executable.
 
-The teardown runs in a **detached helper process**, not inline. Stopping your own
-service from inside it is a race you cannot win: systemd would kill the agent
-partway through its own cleanup, and Windows refuses to delete a running
-executable. Handing the work to a process that outlives the agent avoids both.
+Retirement leaves a marker beside the identity file, and an agent that finds one exits instead of enrolling. That is what stops a supervisor restart quietly resurrecting a decommissioned machine as a ghost device — the failure this protects against is real, and was found by testing rather than reasoning. Coming back is therefore deliberate: reinstall (the installer clears the marker), run once with `-force-enroll`, or delete the marker by hand. The machine returns as a **new device**; the retired record is history, not something to reuse.
 
-The agent only removes its binary if it is running from the canonical install
-path (`/usr/local/bin/monitorrr-agent`, or `C:\Program Files\monitorrr\`).
-Someone testing a build from a working directory should not have it deleted out
-from under them.
+---
 
-**Bringing a retired machine back.** Retirement leaves a marker file beside the
-identity file, and an agent that finds one exits instead of enrolling — that is
-what stops a supervisor restart quietly resurrecting a decommissioned machine as
-a new device. Coming back is therefore deliberate, by one of:
+## Agent auto-update
 
-- reinstalling with the one-line installer, which clears the marker for you
-- running the agent once with `-force-enroll`, which clears it and enrols
-- deleting the marker by hand (`/var/lib/monitorrr/retired`,
-  `/Library/Application Support/monitorrr/retired`, or
-  `C:\ProgramData\monitorrr\retired`)
-
-The machine comes back as a **new device** with a new identity; the retired
-record is kept as history rather than reused.
-
-### Agent auto-update
-
-Agents replace their own binary when the server is serving a different build for
-their platform. The comparison is between **digests, not version strings**: a
-version is opaque text that can repeat across rebuilds or go backwards, and an
-agent that updated to a build reporting the same version would be told to update
-again forever. Digests cannot loop — once the agent is running the served bytes,
-there is nothing left to offer.
+Agents replace their own binary when the server is serving a different build for their platform. The comparison is between **digests, not version strings**: a version is opaque text that can repeat across rebuilds, and an agent that updated to a build reporting the same version would be told to update again forever. Digests cannot loop.
 
 The order of operations is the safety story:
 
@@ -155,179 +173,25 @@ The order of operations is the safety story:
 3. **Run the replacement** with `-version` and check it identifies itself
 4. Swap it in, then exit so the supervisor restarts on the new version
 
-Step 3 is the important one. A truncated or wrong-architecture binary that
-passes a checksum but cannot execute would brick every machine it reached, and
-the fleet would have no way to receive the fix. Any failure leaves the existing
-installation untouched, and the agent keeps running and reporting.
+Step 3 is the important one. A truncated or wrong-architecture binary that passes a checksum but cannot execute would brick every machine it reached, and the fleet would have no way to receive the fix. Any failure leaves the existing installation untouched.
 
-Updates are only offered when a device has no jobs or collections outstanding:
-updating means exiting, and an agent that vanished mid-job would leave that job
-to be swept as lost for nothing. Only a binary at the canonical install path is
-replaced, so a developer's build is never overwritten. `-no-auto-update` opts a
-machine out entirely; the Deployment page has a fleet-wide switch.
+Updates are withheld while a device has work outstanding, since updating means exiting. Only a binary at the canonical install path is replaced, so a developer's build is never overwritten. `-no-auto-update` opts a machine out; the Deployment page has a fleet-wide switch.
 
-On Unix the running binary is renamed over directly — the running process keeps
-its old inode until it exits. Windows refuses to overwrite a running image but
-allows renaming one, so the old binary is moved aside and cleaned up on the next
-start.
-
-### Collecting files from a device
-
-A full path typed on the device page pulls that file back. The agent reports the
-**size first**, before any bytes move — asking for a 40 GB VM image by mistake
-should be obvious from the dashboard, not discovered an hour later. The transfer
-then streams with a live progress bar.
-
-A file that cannot be opened directly is **copied aside and read from the copy**,
-which is how a locked or in-use file becomes collectable; the copy is removed
-afterwards. That fallback cannot fix everything, so the failure messages say
-which problem you have: a permissions failure is fixed by how the agent is
-installed, a lock is not.
-
-Collected files are kept for **7 days**, then deleted by the sweeper. The record
-survives the file: knowing a file was pulled, by whom, and that it has since been
-removed is the point of keeping an audit trail at all. Downloading an expired
-collection returns 410 with that explanation rather than a bare 404.
-
-Files land in `data/collected/`, beside the database and pushed payloads, so one
-backup of `data/` captures everything.
-
-### Job lifecycle
-
-A job is `queued` when dispatched, flips to `running` when an agent collects it
-on a check-in (claiming is transactional, so a job is handed out exactly once),
-and becomes `done` when the result is posted back. A sweeper marks it `lost` if
-the agent never reports — a machine rebooted mid-script, say — so nothing sits
-in `running` forever.
-
-Details that matter in practice:
-
-- Jobs run on their own goroutine in the agent, so a five-minute script never
-  delays heartbeats and makes the device look offline.
-- Scripts execute in their own **process group**, and a timeout kills the group.
-  Killing only the shell leaves `sleep 60` running, and because that grandchild
-  inherits the output pipe, the agent would block until it finished anyway.
-- The agent verifies the script's SHA-256 before writing it to disk. A mismatch
-  is refused outright rather than partially executed.
-- A non-zero exit is a normal result, not an execution failure. `Error` is
-  reserved for "could not run it at all" — timeout, missing interpreter,
-  checksum mismatch.
-- Each job snapshots the script body and hash. Editing or deleting a script
-  never rewrites what the audit trail says already ran.
-- Output is capped at 64 KB per stream, at the agent and again at the store.
-
-**Heartbeats are not stored.** Writing a row per check-in would be ~1,400 rows
-per device per day to answer a question that one mutable `last_seen` column
-already answers. Only *transitions* — enrolled, online, offline, address change,
-version change — land in `device_events`, which keeps the table small and makes
-it readable as an actual timeline. That is also why SQLite is the right backing
-store here rather than a time-series database. All SQL is vanilla and confined
-to `internal/store`, so moving to Postgres later is a driver swap.
-
-## Layout
-
-```
-cmd/server, cmd/agent      entry points
-internal/proto             agent ↔ server wire contract
-internal/store             persistence; all SQL lives here
-internal/server            HTTP API, web UI (embedded templates + assets)
-internal/agent             check-in loop, identity, script execution
-```
-
-Five pages: **Dashboard** (fleet state; a row opens the machine), **Device**
-(facts, actions, run a script, timeline), **Scripts** (authoring only),
-**Runs** (history and output), **Deployment** (installers and downloads).
-
-Actions belong to a device, not to a list. Retire, delete, and dispatch all live
-on the device page; the scripts page is purely for writing and storing scripts.
-
-The UI is server-rendered Go templates plus vanilla JS — no Node, no build step.
-Everything is embedded in the binary with `go:embed`.
-
-## Accounts and roles
-
-On first launch the server has no accounts and serves nothing but a setup page,
-where the first administrator is created. Further accounts are added under
-Settings, in one of two roles:
-
-| | Admin | Read-only |
-|---|---|---|
-| View devices, runs, scripts, collected files | yes | yes |
-| Run scripts, collect files, retire devices | yes | no |
-| Manage scripts, files, tags, settings | yes | no |
-| Manage accounts | yes | not even visible |
-
-The role rule is one line in the middleware: **read-only accounts may issue GET
-and HEAD, nothing else.** Every mutation in this server is a POST, PATCH or
-DELETE, so there is no list of protected endpoints to keep in step with the
-routes — a new mutating endpoint is restricted the moment it is added, rather
-than the moment someone remembers to add it to a list. Account management is
-additionally hidden outright, since a read-only operator has no business
-enumerating accounts.
-
-Passwords are PBKDF2-HMAC-SHA256 at the OWASP-recommended 600,000 iterations,
-per-user salt. Failed logins are indistinguishable whether the account exists or
-not, including in how long they take, so the login page cannot be used to
-enumerate accounts. Sessions are random tokens stored only as hashes; changing a
-password or deleting an account ends that account's sessions immediately.
-
-The last administrator cannot be deleted or demoted — an instance with no
-administrator cannot be recovered through the UI at all.
-
-Agents are unaffected: they authenticate with their own per-device tokens, so
-adding operator accounts does not disturb the fleet.
+---
 
 ## Audit trail
 
-Every state-changing request made through the console is recorded: who, what,
-when, from where, and enough detail to know what actually happened. Sign-ins and
-failed sign-in attempts are recorded too — a trail that shows only successful
-access misses the part worth reviewing.
+Every state-changing request is recorded: who, what, when, from where, and detail enough to know what happened. Sign-ins and failed sign-ins are recorded too — a trail showing only successful access misses the part worth reviewing.
 
-It is middleware, not a call in each handler, for the same reason the read-only
-rule is: anything that changes state is a POST, PATCH or DELETE, so covering
-those covers everything by construction. A new endpoint is audited the moment it
-is added, not the moment someone remembers to instrument it. Handlers can enrich
-their entry with detail, and where none is given the action name is derived from
-the route, so an un-annotated endpoint still records something meaningful.
+It is middleware, not a call in each handler, for the same reason the read-only rule is: anything that changes state is a POST, PATCH or DELETE, so covering those covers everything by construction. Reads are not recorded, and neither are refused requests — recording those would make the log describe things that never happened.
 
-Reads are not recorded — the log would be nothing but noise — and neither are
-refused requests, since recording them would make the log describe things that
-never happened.
+Settings also carries a **theme** (dark, light, system, Nord, Dracula, Solarized Dark, Gruvbox) and a **display time zone**, defaulting to UTC rather than the viewer's browser so that two people reading the same timestamp see the same time.
 
-The Audit page is admin-only, filterable by user, action and free text.
-
-## Appearance and time
-
-Settings carries two display options that apply to everyone using the instance:
-
-- **Theme** — dark (default), light, system, Nord, Dracula, Solarized Dark or
-  Gruvbox. Each is a set of CSS variable overrides, so components follow
-  automatically. "system" is the only one that tracks the operating system's
-  light/dark setting; an explicit choice is not overridden by it.
-- **Time zone** — every timestamp in the console renders in this zone,
-  defaulting to **UTC** rather than the viewer's browser zone. A lab spans
-  machines in several places, and a timestamp is only comparable if everyone
-  reads it the same way. Any IANA name is accepted and validated before it is
-  stored; the zone database is embedded in the server binary so this works on a
-  host with no system zoneinfo.
-
-## Decommissioning
-
-Two irreversible actions live under Settings, both requiring `RESET` to be typed
-rather than a button clicked:
-
-- **Retire every agent** — each machine uninstalls its own agent and stops
-  reporting. Records are kept so you can watch it happen.
-- **Reset this instance** — deletes every device, script, run, uploaded file and
-  collected file, and rotates the enrollment token so old agents cannot rejoin.
-  Accounts are kept, because wiping them would lock you out of the server you
-  just reset. Agents are *not* uninstalled: retire them first if that is what
-  you want.
+---
 
 ## Configuration
 
-Server flags (each also reads an env var):
+Server flags, each also reading an environment variable:
 
 | Flag | Env | Default | Purpose |
 |---|---|---|---|
@@ -336,48 +200,70 @@ Server flags (each also reads an env var):
 | `-dist` | `MONITORRR_DIST` | `dist` | Where agent binaries are served from |
 | `-public-url` | `MONITORRR_PUBLIC_URL` | *(inferred)* | Base URL shown in install commands |
 | `-tls-cert` / `-tls-key` | `MONITORRR_TLS_*` | *(none)* | Enable HTTPS directly |
+| `-debug` | — | off | Verbose logging, including every heartbeat |
 
-Agent flags: `-server`, `-enroll-token`, `-state`, `-insecure`, `-once`,
-`-no-public-ip` (skip resolving the public address via a third party), `-debug`.
+Agent flags: `-server`, `-enroll-token`, `-state`, `-insecure`, `-once`, `-no-public-ip`, `-no-auto-update`, `-force-enroll`, `-debug`.
 
-The database defaults to `monitorrr.db` in the working directory; `make run`
-puts it in `data/`, deliberately outside `dist/` so `make clean` cannot destroy
-it. Losing it means every agent has to be reinstalled, since device identities
-live there.
+`make run` puts the database in `data/`, deliberately outside `dist/` so `make clean` cannot destroy it — losing it means every agent has to be reinstalled.
 
-## Versioning
-
-Builds are stamped from git: `git describe` for the version and a UTC build
-timestamp to separate repeated builds of the same commit. Agents report the full
-string, so the dashboard shows exactly which build each machine is running —
-which is how you tell whether a fleet has picked up a fix.
-
-```
-monitorrr-agent v0.1.0-2-g6c2aac2 (2026-08-15T09:47:40Z)
-```
-
-Capabilities are advertised separately from the version. An agent sends the list
-of instructions it understands (`jobs`, `retire`), because a build identifier is
-opaque and an old agent silently ignores fields it does not know — the server
-needs to distinguish "will never act on this" from "has not got round to it".
+---
 
 ## Security notes
 
-- Devices authenticate with a per-device token issued at enrollment; only its
-  SHA-256 hash is stored. The enrollment token is a separate shared secret and
-  can be rotated without disturbing enrolled devices.
-- `/install.sh` and `/download/*` authenticate with the enrollment token
-  (`?token=`) rather than the admin password: a machine being provisioned has
-  the token but no business holding admin credentials, and anyone with the token
-  can enroll anyway, so the trust level is unchanged.
-- The identity file is written `0600` via a temp file and rename.
-- **The UI requires an account**, created on first launch. Without TLS, however,
-  both session cookies and agent tokens cross the network in clear text, and the
-  server warns about that at startup. Terminate TLS before this is reachable
-  from anywhere untrusted.
-- **Remote execution is a serious trust boundary.** Scripts run as whatever the
-  agent runs as — root under systemd, SYSTEM under the Windows task. Any admin
-  account can therefore execute arbitrary code on every enrolled machine, which
-  is what the read-only role is for: someone who only needs to look should not
-  hold that power. Every save and dispatch is logged with who, what (name +
-  SHA-256), and where.
+- **This tool executes arbitrary code as root and SYSTEM on every enrolled machine.** That is what it is for, and it is also the whole risk. Any admin account can do it, which is what the read-only role exists for.
+- Devices authenticate with a per-device token issued at enrollment; only its SHA-256 hash is stored. The enrollment token is a separate shared secret and can be rotated without disturbing enrolled devices.
+- `/install.sh` and `/download/*` authenticate with the enrollment token rather than an operator account: a machine being provisioned has the token but no business holding admin credentials.
+- Session cookies are `HttpOnly` and `SameSite=Lax`, and `Secure` when served over TLS.
+- **Without TLS, session cookies and agent tokens cross the network in clear text.** The server warns about this at startup. Terminate TLS before this is reachable from anywhere untrusted.
+- Every script save and dispatch is logged with who, what (name and SHA-256), and where.
+
+---
+
+## Project structure
+
+```
+cmd/server/main.go          server entry point and flags
+cmd/agent/main.go           agent entry point and flags
+internal/proto/             the agent ↔ server wire contract
+internal/store/             persistence; every SQL statement lives here
+  store.go                  devices, heartbeats, transitions, schema, migrations
+  scripts.go                scripts and jobs
+  collections.go            files pulled off devices
+  payloads.go               files pushed to devices
+  users.go                  accounts, sessions, resets
+  audit.go                  audit log, theme and time zone
+  tags.go                   device tags and fleet dispatch
+internal/server/            HTTP API and web UI
+  server.go                 routes, check-in, sweepers
+  auth.go                   setup, login, sessions, role enforcement
+  audit.go                  change-recording middleware
+  agentbuilds.go            agent binary digests and self-update decisions
+  collections.go            file collection endpoints and retention
+  payloads.go               file upload and per-job serving
+  reset.go                  fleet reset and factory reset
+  starter.go                the built-in script library
+  web/templates/            server-rendered pages
+  web/static/               one stylesheet, one script
+  web/starter/              the built-in script library sources
+internal/agent/             check-in loop, identity, execution
+  agent.go                  the loop, enrollment, job queueing
+  exec.go                   script execution, process groups, output caps
+  collect.go                pulling files back
+  update.go                 self-replacement
+  uninstall.go              retirement and the tombstone
+data/                       database, uploads and collected files (created on first run)
+```
+
+---
+
+## How it's built
+
+Go and SQLite, with `modernc.org/sqlite` as the only external dependency — a pure-Go driver, so `CGO_ENABLED=0` cross-compiles every target from one machine with no C toolchain. Both binaries are static; the endpoint needs nothing installed.
+
+The interesting parts:
+
+- **`internal/proto`** is the whole contract between the two halves. The server is strict about what it accepts and the agent is lenient about what it receives, which is what lets an old agent keep working against a new server while a new agent still fails loudly against an old one.
+- **`internal/agent/exec.go`** is where most of the sharp edges live: process groups so a timeout kills the tree rather than just the shell, capped output that never short-writes to the child, and the distinction between "exited non-zero" and "could not be run".
+- **`internal/agent/uninstall.go`** holds the tombstone. It is the smallest file with the most reasoning behind it, all of it about a supervisor restarting an agent at the wrong moment.
+- **`internal/server/auth.go`** enforces both rules that matter — signed in, and allowed — in one middleware, on purpose.
+- **`internal/store/store.go`** owns the schema and the migrations. Every column added after the first release is applied there, so an existing database is upgraded on open rather than needing to be rebuilt.

@@ -84,6 +84,12 @@ const OS_LABEL = { darwin: "macOS", windows: "Windows", linux: "Linux" };
 
 const duration = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
 
+const humanSize = (n) =>
+  n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB`
+  : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB`
+  : n >= 1024 ? `${(n / 1024).toFixed(1)} KB`
+  : `${n} B`;
+
 // Retirement has several visible stages, and "stuck" needs distinguishing from
 // "not yet" — the fixes differ, so the badge says which.
 function deviceStatus(dev) {
@@ -489,12 +495,6 @@ if (devicePanel) {
     renderEvents(d.events);
   }
 
-  const humanSize = (n) =>
-    n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB`
-    : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB`
-    : n >= 1024 ? `${(n / 1024).toFixed(1)} KB`
-    : `${n} B`;
-
   function collectStateClass(c) {
     if (c.state === "done") return "ok";
     if (c.state === "failed") return "bad";
@@ -517,9 +517,8 @@ if (devicePanel) {
         const size = c.size ? humanSize(c.size) : "—";
         let progress;
         if (c.state === "transferring" && c.size > 0) {
-          const pct = Math.min(100, Math.round((c.received / c.size) * 100));
-          progress = `<div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
-                      <span class="device-id">${pct}% · ${humanSize(c.received)}</span>`;
+          progress = `<div class="bar"><div class="bar-fill" style="width:${c.progress}%"></div></div>
+                      <span class="device-id">${c.progress}% · ${humanSize(c.received)}</span>`;
         } else if (c.state === "done") {
           progress = '<span class="ok">complete</span>';
         } else if (c.state === "failed") {
@@ -740,12 +739,6 @@ if (scriptList) {
       toast(err.message, true);
     }
   }
-
-  const humanSize = (n) =>
-    n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB`
-    : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB`
-    : n >= 1024 ? `${(n / 1024).toFixed(1)} KB`
-    : `${n} B`;
 
   function renderPayloads() {
     const body = $("#payload-list");
@@ -1086,12 +1079,14 @@ if (usersBody) {
     }
   });
 
-  // Both of these are irreversible, so they ask for the word to be typed
-  // rather than accepting a click.
-  async function confirmDestructive(title, detail, path) {
+  // All three are irreversible, so they ask for a word to be typed rather than
+  // accepting a click. The factory reset asks for a different word: wiping the
+  // fleet and wiping the whole instance are not the same decision and should
+  // not be confirmable by the same reflex.
+  async function confirmDestructive(title, detail, path, word) {
     if (!confirm(`${title}\n\n${detail}`)) return null;
-    const typed = prompt(`Type RESET to confirm:`);
-    if (typed !== "RESET") {
+    const typed = prompt(`Type ${word} to confirm:`);
+    if (typed !== word) {
       if (typed !== null) toast("Not confirmed — nothing was changed");
       return null;
     }
@@ -1103,9 +1098,33 @@ if (usersBody) {
       const res = await confirmDestructive(
         "Retire every agent?",
         "Each machine will uninstall its agent on its next check-in and stop reporting.",
-        "/api/admin/retire-all"
+        "/api/admin/retire-all",
+        "RESET"
       );
       if (res) toast(`${res.retiring} device(s) retiring`);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("#factory-reset").addEventListener("click", async () => {
+    try {
+      const res = await confirmDestructive(
+        "Factory reset this instance?",
+        "Everything is deleted INCLUDING every account, the audit log and all settings. " +
+          "You will be signed out and asked to create a new administrator.",
+        "/api/admin/factory-reset",
+        "FACTORY RESET"
+      );
+      if (res) {
+        const r = res.removed;
+        alert(
+          `Factory reset complete.\n\n` +
+          `Removed ${r.devices} devices, ${r.scripts} scripts, ${r.jobs} runs and ${r.accounts} account(s).\n\n` +
+          `You will now be taken to the setup page to create a new administrator.`
+        );
+        window.location.href = "/setup";
+      }
     } catch (err) {
       toast(err.message, true);
     }
@@ -1116,7 +1135,8 @@ if (usersBody) {
       const res = await confirmDestructive(
         "Reset this instance?",
         "Every device, script, run and stored file is deleted and the enrollment token is rotated. Accounts are kept. Agents are NOT uninstalled.",
-        "/api/admin/reset"
+        "/api/admin/reset",
+        "RESET"
       );
       if (res) {
         const r = res.removed;

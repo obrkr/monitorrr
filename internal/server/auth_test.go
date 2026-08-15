@@ -222,3 +222,15 @@ func postJSON(srv *Server, path, body string) *httptest.ResponseRecorder {
 	srv.routes().ServeHTTP(rec, req)
 	return rec
 }
+
+// postAs issues a JSON POST with a body, as a signed-in account.
+func postAs(srv *Server, cookie *http.Cookie, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	return rec
+}

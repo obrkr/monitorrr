@@ -166,6 +166,7 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("DELETE /api/users/{id}", s.handleDeleteUser)
 	admin.HandleFunc("POST /api/admin/retire-all", s.handleRetireAll)
 	admin.HandleFunc("POST /api/admin/reset", s.handleReset)
+	admin.HandleFunc("POST /api/admin/factory-reset", s.handleFactoryReset)
 	admin.HandleFunc("GET /api/devices", s.handleListDevices)
 	admin.HandleFunc("GET /api/events", s.handleListEvents)
 	admin.HandleFunc("DELETE /api/devices/{id}", s.handleDeleteDevice)
@@ -258,6 +259,14 @@ func (s *Server) sweepLoop(ctx context.Context) {
 
 			// Collected files past their retention are deleted here.
 			s.sweepCollections(ctx)
+
+			// Lapsed logins are rejected on use, but the rows would otherwise
+			// stay in the database indefinitely.
+			if n, err := s.st.SweepExpiredSessions(ctx); err != nil {
+				s.log.Error("session sweep failed", "error", err)
+			} else if n > 0 {
+				s.log.Info("removed expired sessions", "count", n)
+			}
 
 			// A job whose agent never reported back would otherwise sit in
 			// "running" forever and misrepresent the fleet's real state.
