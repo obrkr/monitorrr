@@ -27,6 +27,30 @@
 
 <section class="panel">
   <div class="panel-head">
+    <h2>Collect a file</h2>
+    <span class="muted" id="retention-note">kept for 7 days, then deleted</span>
+  </div>
+  <div class="run-row">
+    <input type="text" id="collect-path" placeholder="/var/log/syslog  or  C:\Windows\Temp\app.log">
+    <button type="button" id="collect-now" class="primary">Collect</button>
+  </div>
+  <p class="note">
+    The agent reports the size first, then transfers. A file that is locked or
+    in use is copied aside and read from the copy; the copy is removed
+    afterwards.
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>State</th><th>Path</th><th>Size</th><th>Progress</th><th>Expires</th><th></th></tr>
+      </thead>
+      <tbody id="collections"><tr class="empty"><td colspan="6">Nothing collected yet.</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
     <h2>Runs on this device</h2>
     <span class="muted">select a run to see its output</span>
   </div>

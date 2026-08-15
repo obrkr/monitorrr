@@ -188,6 +188,14 @@ td.go { cursor: pointer; }
 
 .head-actions { display: flex; gap: 6px; }
 
+.bar {
+  display: inline-block; vertical-align: middle;
+  width: 110px; height: 6px; border-radius: 3px;
+  background: var(--border); overflow: hidden; margin-right: 8px;
+}
+.bar-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
+#collect-path { min-width: 340px; font-family: var(--mono); font-size: 13px; }
+
 .upload-row { display: flex; align-items: center; gap: 10px; padding: 16px 18px; flex-wrap: wrap; }
 .upload-row input[type="file"] { font-size: 13px; color: var(--muted); max-width: 100%; }
 .payload-picker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -202,6 +210,10 @@ td.go { cursor: pointer; }
 .crumb a:hover { color: var(--accent); }
 
 .run-row { display: flex; align-items: center; gap: 10px; padding: 18px 18px 0; flex-wrap: wrap; }
+.run-row input[type="text"] {
+  padding: 8px 11px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 14px;
+}
 .run-row select {
   min-width: 280px; padding: 8px 11px;
   background: var(--panel-2); color: var(--text);

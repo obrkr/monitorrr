@@ -203,12 +203,20 @@ func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	collections, err := s.st.DeviceCollections(r.Context(), id, 50)
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "could not read collected files", err)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"device":           device,
 		"events":           events,
 		"jobs":             jobs,
+		"collections":      collections,
 		"runnable_scripts": runnable,
 		"supports_retire":  device.SupportsRetire(),
+		"retention_days":   int(store.CollectRetention.Hours() / 24),
 	})
 }
 

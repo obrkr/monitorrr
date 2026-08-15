@@ -45,6 +45,14 @@ function relTime(iso) {
   return `${Math.round(secs / 86400)}d ago`;
 }
 
+function relFuture(iso) {
+  const secs = (new Date(iso).getTime() - Date.now()) / 1000;
+  if (secs <= 0) return "due";
+  if (secs < 3600) return `in ${Math.round(secs / 60)}m`;
+  if (secs < 172800) return `in ${Math.round(secs / 3600)}h`;
+  return `in ${Math.round(secs / 86400)}d`;
+}
+
 const OS_LABEL = { darwin: "macOS", windows: "Windows", linux: "Linux" };
 
 const duration = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
@@ -395,8 +403,8 @@ if (devicePanel) {
     }
 
     const dev = d.device;
-    // Re-rendering while the operator is typing tags would discard their input.
-    if (tagsFocused) return;
+    // Re-rendering while the operator is typing would discard their input.
+    if (tagsFocused || document.activeElement === $("#collect-path")) return;
     document.title = `monitorrr · ${dev.hostname}`;
     $("#device-hostname").textContent = dev.hostname;
     $("#device-status").innerHTML = statusBadge(dev);
@@ -447,8 +455,72 @@ if (devicePanel) {
     $("#delete-device").addEventListener("click", () => deleteDevice(dev));
 
     renderRunPanel(d, dev, retired || retiring);
+    renderCollections(d.collections || [], d.retention_days || 7);
     renderJobs(d.jobs);
     renderEvents(d.events);
+  }
+
+  const humanSize = (n) =>
+    n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB`
+    : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB`
+    : n >= 1024 ? `${(n / 1024).toFixed(1)} KB`
+    : `${n} B`;
+
+  function collectStateClass(c) {
+    if (c.state === "done") return "ok";
+    if (c.state === "failed") return "bad";
+    if (c.state === "expired") return "muted";
+    return "warn";
+  }
+
+  function renderCollections(collections, retentionDays) {
+    $("#retention-note").textContent = `kept for ${retentionDays} days, then deleted`;
+    const body = $("#collections");
+    if (!collections.length) {
+      body.innerHTML = '<tr class="empty"><td colspan="6">Nothing collected yet.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = collections
+      .map((c) => {
+        // Size is known before any bytes move, so it is shown as soon as the
+        // agent has looked at the file.
+        const size = c.size ? humanSize(c.size) : "—";
+        let progress;
+        if (c.state === "transferring" && c.size > 0) {
+          const pct = Math.min(100, Math.round((c.received / c.size) * 100));
+          progress = `<div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+                      <span class="device-id">${pct}% · ${humanSize(c.received)}</span>`;
+        } else if (c.state === "done") {
+          progress = '<span class="ok">complete</span>';
+        } else if (c.state === "failed") {
+          progress = `<span class="bad" title="${esc(c.error)}">${esc(c.error.slice(0, 60))}</span>`;
+        } else if (c.state === "expired") {
+          progress = '<span class="muted">deleted after retention</span>';
+        } else {
+          progress = '<span class="muted">waiting for the agent…</span>';
+        }
+
+        const expires = c.expires_at
+          ? (c.state === "expired" ? "deleted" : relFuture(c.expires_at))
+          : "—";
+
+        const actions =
+          c.state === "done"
+            ? `<a class="btn" href="/api/collections/${esc(c.id)}/download">Download</a>
+               <button class="link danger-link" data-delete-collection="${esc(c.id)}">Delete</button>`
+            : `<button class="link danger-link" data-delete-collection="${esc(c.id)}">Remove</button>`;
+
+        return `<tr>
+          <td><span class="${collectStateClass(c)}">${esc(c.state)}</span>${c.copied ? ' <span class="os-badge" title="the file was locked, so it was copied aside and read from the copy">copied</span>' : ""}</td>
+          <td><code class="device-id">${esc(c.path)}</code></td>
+          <td class="muted">${size}</td>
+          <td>${progress}</td>
+          <td class="muted">${expires}</td>
+          <td class="row-actions">${actions}</td>
+        </tr>`;
+      })
+      .join("");
   }
 
   function renderRunPanel(d, dev, blocked) {
@@ -567,6 +639,42 @@ if (devicePanel) {
         body: JSON.stringify({ script_id: scriptID }),
       });
       toast("Queued — it runs on the next check-in");
+      loadDevice();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("#collect-now").addEventListener("click", async () => {
+    const path = $("#collect-path").value.trim();
+    if (!path) {
+      toast("Enter a full file path", true);
+      return;
+    }
+    try {
+      await api(`/api/devices/${deviceID}/collect`, {
+        method: "POST",
+        body: JSON.stringify({ path }),
+      });
+      $("#collect-path").value = "";
+      toast("Requested — the agent will send it on its next check-in");
+      loadDevice();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("#collect-path").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#collect-now").click();
+  });
+
+  $("#collections").addEventListener("click", async (e) => {
+    const id = e.target.dataset?.deleteCollection;
+    if (!id) return;
+    if (!confirm("Delete this collected file from the server?")) return;
+    try {
+      await api(`/api/collections/${id}`, { method: "DELETE" });
+      toast("Deleted");
       loadDevice();
     } catch (err) {
       toast(err.message, true);

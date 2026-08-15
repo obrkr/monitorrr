@@ -35,10 +35,11 @@ const (
 	FeatureJobs     = "jobs"
 	FeatureRetire   = "retire"
 	FeaturePayloads = "payloads"
+	FeatureCollect  = "collect"
 )
 
 // AgentFeatures is what this build of the agent advertises.
-var AgentFeatures = []string{FeatureJobs, FeatureRetire, FeaturePayloads}
+var AgentFeatures = []string{FeatureJobs, FeatureRetire, FeaturePayloads, FeatureCollect}
 
 // CheckinRequest is the heartbeat, sent every Interval seconds.
 type CheckinRequest struct {
@@ -86,10 +87,31 @@ type JobResult struct {
 	Truncated  bool   `json:"truncated"`
 }
 
+// Collect asks the agent to send back a file from the device.
+type Collect struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
+}
+
+// CollectMeta is what the agent reports after looking at the requested file,
+// before any bytes are transferred. Size is sent first deliberately: an
+// operator who has asked for something enormous by mistake should find out
+// before the transfer starts, not after.
+type CollectMeta struct {
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+	// Copied is set when the file had to be duplicated to a temporary location
+	// before it could be read — the path taken for locked or in-use files.
+	Copied bool   `json:"copied"`
+	Error  string `json:"error,omitempty"`
+}
+
 // CheckinResponse carries control data back to the agent.
 type CheckinResponse struct {
 	Interval int   `json:"interval_seconds"`
 	Jobs     []Job `json:"jobs,omitempty"`
+	// Collections are files to send back to the server.
+	Collections []Collect `json:"collections,omitempty"`
 	// Retire tells the agent to uninstall itself and stop. It is the opposite
 	// of deleting a device record, which a running agent simply recovers from
 	// by re-enrolling.

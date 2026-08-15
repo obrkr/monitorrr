@@ -74,7 +74,11 @@ type Agent struct {
 	// delays heartbeats — otherwise a five-minute script would make the device
 	// look offline while it was doing exactly what it was told.
 	jobs chan proto.Job
-	mu   sync.Mutex
+	// Collections run on their own worker: a multi-gigabyte transfer must not
+	// hold up either heartbeats or script execution.
+	collections     chan proto.Collect
+	seenCollections map[string]bool
+	mu              sync.Mutex
 	// seen guards against executing the same job twice if a check-in response
 	// is somehow redelivered.
 	seen map[string]bool
@@ -105,9 +109,11 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		client: &http.Client{Timeout: 15 * time.Second, Transport: transport},
 		// Replaced by the server's value at enrollment and on every check-in;
 		// this is only what we use before the first successful exchange.
-		interval: 60 * time.Second,
-		jobs:     make(chan proto.Job, 64),
-		seen:     make(map[string]bool),
+		interval:        60 * time.Second,
+		jobs:            make(chan proto.Job, 64),
+		seen:            make(map[string]bool),
+		collections:     make(chan proto.Collect, 32),
+		seenCollections: make(map[string]bool),
 	}, nil
 }
 
@@ -177,9 +183,11 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 			return err
 		}
+		a.drainCollections(ctx)
 		return a.drainJobs(ctx)
 	}
 	go a.jobWorker(ctx)
+	go a.collectWorker(ctx)
 
 	// Backoff applies only to transport failures; a healthy loop always runs at
 	// the server-provided interval.
@@ -287,7 +295,9 @@ func (a *Agent) checkin(ctx context.Context) error {
 		a.setInterval(resp.Interval)
 	}
 	a.enqueue(ctx, resp.Jobs)
-	a.log.Debug("checked in", "interval", a.interval, "jobs", len(resp.Jobs))
+	a.enqueueCollections(ctx, resp.Collections)
+	a.log.Debug("checked in", "interval", a.interval,
+		"jobs", len(resp.Jobs), "collections", len(resp.Collections))
 	return nil
 }
 

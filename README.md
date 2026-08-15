@@ -26,6 +26,11 @@ Two static binaries, one SQLite file, no runtime dependencies on either side.
   script body that was sent
 - **Compatibility enforced** — a PowerShell script cannot be queued against a
   Linux box, and a mixed selection fails rather than half-running
+- **Push a file and run it** — attach an installer to a script; the agent
+  fetches it, verifies its digest, and passes the path as `$MONITORRR_PAYLOAD`
+- **Collect a file** — pull any path off a device, size reported first, kept 7 days
+- **Tags and fleet dispatch** — label devices and run one script across a group
+- **Starter library** — twelve read-only diagnostics, imported with one click
 
 ## Quick start
 
@@ -119,6 +124,27 @@ The agent only removes its binary if it is running from the canonical install
 path (`/usr/local/bin/monitorrr-agent`, or `C:\Program Files\monitorrr\`).
 Someone testing a build from a working directory should not have it deleted out
 from under them.
+
+### Collecting files from a device
+
+A full path typed on the device page pulls that file back. The agent reports the
+**size first**, before any bytes move — asking for a 40 GB VM image by mistake
+should be obvious from the dashboard, not discovered an hour later. The transfer
+then streams with a live progress bar.
+
+A file that cannot be opened directly is **copied aside and read from the copy**,
+which is how a locked or in-use file becomes collectable; the copy is removed
+afterwards. That fallback cannot fix everything, so the failure messages say
+which problem you have: a permissions failure is fixed by how the agent is
+installed, a lock is not.
+
+Collected files are kept for **7 days**, then deleted by the sweeper. The record
+survives the file: knowing a file was pulled, by whom, and that it has since been
+removed is the point of keeping an audit trail at all. Downloading an expired
+collection returns 410 with that explanation rather than a bare 404.
+
+Files land in `data/collected/`, beside the database and pushed payloads, so one
+backup of `data/` captures everything.
 
 ### Job lifecycle
 

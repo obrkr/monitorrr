@@ -114,6 +114,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/jobs/{id}/result", s.handleJobResult)
 	mux.HandleFunc("POST /v1/retire/ack", s.handleRetireAck)
 	mux.HandleFunc("GET /v1/payload/{job}", s.handleServePayload)
+	mux.HandleFunc("POST /v1/collect/{id}/meta", s.handleCollectMeta)
+	mux.HandleFunc("POST /v1/collect/{id}/data", s.handleCollectData)
+	mux.HandleFunc("POST /v1/collect/{id}/complete", s.handleCollectComplete)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, "ok")
@@ -147,6 +150,9 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("DELETE /api/devices/{id}", s.handleDeleteDevice)
 	admin.HandleFunc("POST /api/devices/{id}/retire", s.handleRetireDevice)
 	admin.HandleFunc("POST /api/devices/{id}/tags", s.handleSetTags)
+	admin.HandleFunc("POST /api/devices/{id}/collect", s.handleRequestCollection)
+	admin.HandleFunc("GET /api/collections/{id}/download", s.handleDownloadCollection)
+	admin.HandleFunc("DELETE /api/collections/{id}", s.handleDeleteCollection)
 	admin.HandleFunc("GET /api/tags", s.handleListTags)
 	admin.HandleFunc("POST /api/dispatch", s.handleFleetDispatch)
 	admin.HandleFunc("POST /api/settings/interval", s.handleSetInterval)
@@ -227,6 +233,9 @@ func (s *Server) sweepLoop(ctx context.Context) {
 			} else if n > 0 {
 				s.log.Info("marked devices offline", "count", n)
 			}
+
+			// Collected files past their retention are deleted here.
+			s.sweepCollections(ctx)
 
 			// A job whose agent never reported back would otherwise sit in
 			// "running" forever and misrepresent the fleet's real state.
@@ -353,7 +362,21 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("dispatched jobs", "device", id, "count", len(jobs))
 	}
 
-	writeJSON(w, http.StatusOK, proto.CheckinResponse{Interval: interval, Jobs: jobs})
+	claimedCollections, err := s.st.ClaimCollections(r.Context(), id)
+	if err != nil {
+		s.log.Error("could not claim collections", "device", id, "error", err)
+	}
+	collections := make([]proto.Collect, 0, len(claimedCollections))
+	for _, c := range claimedCollections {
+		collections = append(collections, proto.Collect{ID: c.ID, Path: c.Path})
+	}
+	if len(collections) > 0 {
+		s.log.Info("dispatched file collections", "device", id, "count", len(collections))
+	}
+
+	writeJSON(w, http.StatusOK, proto.CheckinResponse{
+		Interval: interval, Jobs: jobs, Collections: collections,
+	})
 }
 
 // --- admin API ---

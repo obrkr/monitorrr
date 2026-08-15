@@ -126,6 +126,30 @@ CREATE TABLE IF NOT EXISTS jobs (
   payload_name    TEXT NOT NULL DEFAULT '',
   payload_sha256  TEXT NOT NULL DEFAULT ''
 );
+-- Files pulled off a device. The bytes land on disk beside the database; this
+-- row tracks the request, its progress, and when the file is due for deletion.
+CREATE TABLE IF NOT EXISTS collections (
+  id              TEXT PRIMARY KEY,
+  device_id       TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  device_hostname TEXT NOT NULL,
+  path            TEXT NOT NULL,
+  filename        TEXT NOT NULL DEFAULT '',
+  state           TEXT NOT NULL,
+  size            INTEGER NOT NULL DEFAULT 0,
+  received        INTEGER NOT NULL DEFAULT 0,
+  sha256          TEXT NOT NULL DEFAULT '',
+  error           TEXT NOT NULL DEFAULT '',
+  -- Whether the agent had to copy the file aside before reading it, which is
+  -- how a locked or in-use file gets collected.
+  copied          INTEGER NOT NULL DEFAULT 0,
+  created_by      TEXT NOT NULL DEFAULT '',
+  created_at      INTEGER NOT NULL,
+  finished_at     INTEGER,
+  expires_at      INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_collections_device ON collections(device_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collections_pending ON collections(device_id, state);
+
 CREATE INDEX IF NOT EXISTS idx_jobs_pending ON jobs(device_id, state);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
 `
