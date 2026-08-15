@@ -186,6 +186,8 @@ td.empty, tr.empty td { color: var(--muted); text-align: center; padding: 34px; 
 th.tick, td.tick { width: 34px; padding-right: 0; }
 td.go { cursor: pointer; }
 
+.head-actions { display: flex; gap: 6px; }
+
 .upload-row { display: flex; align-items: center; gap: 10px; padding: 16px 18px; flex-wrap: wrap; }
 .upload-row input[type="file"] { font-size: 13px; color: var(--muted); max-width: 100%; }
 .payload-picker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

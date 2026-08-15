@@ -686,6 +686,25 @@ if (scriptList) {
 
   $("#new-script").addEventListener("click", () => loadScript(null));
 
+  $("#import-starters").addEventListener("click", async () => {
+    try {
+      const preview = await api("/api/scripts/starter");
+      const missing = preview.starters.filter((s) => !s.already_present);
+      if (!missing.length) {
+        toast("Every starter script is already here");
+        return;
+      }
+      const names = missing.map((s) => `  • ${s.name} — ${s.description}`).join("\n");
+      if (!confirm(`Add ${missing.length} starter script(s)?\n\n${names}\n\nAll are read-only diagnostics. Existing scripts with the same name are left untouched.`)) return;
+
+      const res = await api("/api/scripts/starter", { method: "POST" });
+      await load();
+      toast(`Added ${res.imported.length} script(s)`);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {

@@ -155,6 +155,8 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("POST /api/scripts", s.handleSaveScript)
 	admin.HandleFunc("DELETE /api/scripts/{id}", s.handleDeleteScript)
 	admin.HandleFunc("POST /api/scripts/{id}/dispatch", s.handleDispatch)
+	admin.HandleFunc("GET /api/scripts/starter", s.handleListStarterScripts)
+	admin.HandleFunc("POST /api/scripts/starter", s.handleImportStarterScripts)
 	admin.HandleFunc("GET /api/payloads", s.handleListPayloads)
 	admin.HandleFunc("POST /api/payloads", s.handleUploadPayload)
 	admin.HandleFunc("DELETE /api/payloads/{id}", s.handleDeletePayload)

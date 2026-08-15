@@ -1,0 +1,86 @@
+[
+  {
+    "name": "system-inventory",
+    "description": "OS, addresses, local user accounts and who is logged in",
+    "interpreter": "sh",
+    "file": "inventory.sh",
+    "timeout_seconds": 60
+  },
+  {
+    "name": "system-inventory (Windows)",
+    "description": "OS, addresses, local user accounts and who is logged in",
+    "interpreter": "powershell",
+    "file": "inventory.ps1",
+    "timeout_seconds": 60
+  },
+  {
+    "name": "disk-space",
+    "description": "Free space per filesystem, and the largest directories under /var and /home",
+    "interpreter": "sh",
+    "file": "disk-space.sh",
+    "timeout_seconds": 120
+  },
+  {
+    "name": "disk-space (Windows)",
+    "description": "Free space per drive, and the largest folders under C:\\Users",
+    "interpreter": "powershell",
+    "file": "disk-space.ps1",
+    "timeout_seconds": 120
+  },
+  {
+    "name": "top-processes",
+    "description": "The ten processes using the most CPU and the most memory",
+    "interpreter": "sh",
+    "file": "top-processes.sh",
+    "timeout_seconds": 60
+  },
+  {
+    "name": "top-processes (Windows)",
+    "description": "The ten processes using the most CPU and the most memory",
+    "interpreter": "powershell",
+    "file": "top-processes.ps1",
+    "timeout_seconds": 60
+  },
+  {
+    "name": "network-check",
+    "description": "Default route, DNS resolution and reachability of the gateway and internet",
+    "interpreter": "sh",
+    "file": "network-check.sh",
+    "timeout_seconds": 90
+  },
+  {
+    "name": "network-check (Windows)",
+    "description": "Default route, DNS resolution and reachability of the gateway and internet",
+    "interpreter": "powershell",
+    "file": "network-check.ps1",
+    "timeout_seconds": 90
+  },
+  {
+    "name": "pending-updates",
+    "description": "Counts available package updates and whether a reboot is required",
+    "interpreter": "sh",
+    "file": "updates.sh",
+    "timeout_seconds": 180
+  },
+  {
+    "name": "pending-updates (Windows)",
+    "description": "Counts available Windows updates and whether a reboot is pending",
+    "interpreter": "powershell",
+    "file": "updates.ps1",
+    "timeout_seconds": 180
+  },
+  {
+    "name": "service-health",
+    "description": "Failed systemd units, or launchd services that exited non-zero",
+    "interpreter": "sh",
+    "file": "service-health.sh",
+    "timeout_seconds": 60
+  },
+  {
+    "name": "service-health (Windows)",
+    "description": "Automatic services that are not running",
+    "interpreter": "powershell",
+    "file": "service-health.ps1",
+    "timeout_seconds": 60
+  }
+]
