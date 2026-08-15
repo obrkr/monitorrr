@@ -493,7 +493,8 @@ pre code { font-family: var(--mono); font-size: 12.5px; line-height: 1.65; backg
 .editor { padding: 18px; }
 .editor-row { margin-bottom: 14px; }
 .editor-row label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 5px; }
-.editor-row input[type="text"], .editor-row textarea, .editor-row select, .editor-row input[type="number"] {
+.editor-row input[type="text"], .editor-row input[type="password"],
+.editor-row textarea, .editor-row select, .editor-row input[type="number"] {
   width: 100%; padding: 8px 11px;
   background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 7px;
