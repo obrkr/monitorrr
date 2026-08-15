@@ -8,6 +8,10 @@ import (
 	"runtime"
 )
 
+// filepathBase is filepath.Base under a name the platform files can share
+// without each importing path/filepath for one call.
+func filepathBase(p string) string { return filepath.Base(p) }
+
 // canonicalInstallPath is where the installer puts the binary. Self-uninstall
 // only removes the executable when it is running from here — otherwise someone
 // testing a build from a working directory would have it deleted underneath
