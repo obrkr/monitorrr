@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 
@@ -49,6 +50,7 @@ func (s *Server) handleRetireAll(w http.ResponseWriter, r *http.Request) {
 		retired++
 	}
 
+	auditf(r, "admin.retire-all", "", fmt.Sprintf("%d device(s) asked to uninstall their agents", retired))
 	s.log.Warn("fleet-wide retirement requested", "devices", retired, "by", by)
 	writeJSON(w, http.StatusOK, map[string]any{"retiring": retired})
 }
@@ -97,6 +99,9 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditf(r, "admin.reset", "", fmt.Sprintf(
+		"removed %d devices, %d scripts, %d runs, %d collections, %d files; enrollment token rotated",
+		summary.Devices, summary.Scripts, summary.Jobs, summary.Collections, summary.Payloads))
 	s.log.Warn("instance reset complete", "by", by,
 		"devices", summary.Devices, "scripts", summary.Scripts, "jobs", summary.Jobs,
 		"collections", summary.Collections, "payloads", summary.Payloads)

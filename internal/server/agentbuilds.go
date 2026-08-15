@@ -181,6 +181,11 @@ func (s *Server) handleSetAutoUpdate(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "could not change the setting", err)
 		return
 	}
+	state := "disabled"
+	if body.Enabled {
+		state = "enabled"
+	}
+	auditf(r, "settings.auto-update", state, "fleet-wide agent auto-update "+state)
 	s.log.Info("auto-update setting changed", "enabled", body.Enabled, "by", adminUser(r))
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": body.Enabled})
 }

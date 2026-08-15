@@ -156,6 +156,10 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("GET /runs", s.handleRunsPage)
 	admin.HandleFunc("GET /deployment", s.handleDeployment)
 	admin.HandleFunc("GET /settings", s.handleSettingsPage)
+	admin.HandleFunc("GET /audit", s.handleAuditPage)
+	admin.HandleFunc("GET /api/audit", s.handleListAudit)
+	admin.HandleFunc("POST /api/settings/theme", s.handleSetTheme)
+	admin.HandleFunc("POST /api/settings/timezone", s.handleSetTimezone)
 	admin.HandleFunc("GET /api/users", s.handleListUsers)
 	admin.HandleFunc("POST /api/users", s.handleCreateUser)
 	admin.HandleFunc("PATCH /api/users/{id}", s.handleUpdateUser)
@@ -187,7 +191,7 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("POST /api/scripts/{id}/payload", s.handleAttachPayload)
 	admin.HandleFunc("GET /api/jobs", s.handleListJobs)
 	admin.HandleFunc("GET /api/jobs/{id}", s.handleGetJob)
-	mux.Handle("/", s.requireAuth(admin))
+	mux.Handle("/", s.requireAuth(s.recordChanges(admin)))
 
 	return s.withLogging(mux)
 }
@@ -463,7 +467,8 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "could not delete device", err)
 		return
 	}
-	s.log.Info("device deleted", "id", id)
+	auditf(r, "device.delete", id, "record removed; a running agent will re-enrol")
+	s.log.Info("device deleted", "id", id, "by", adminUser(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -480,6 +485,7 @@ func (s *Server) handleRetireDevice(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "could not retire device", err)
 		return
 	}
+	auditf(r, "device.retire", id, "agent asked to uninstall itself")
 	s.log.Info("device retirement requested", "id", id, "by", adminUser(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "retiring"})
 }
@@ -518,7 +524,8 @@ func (s *Server) handleSetInterval(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, proto.Error{Error: err.Error()})
 		return
 	}
-	s.log.Info("check-in interval changed", "seconds", body.Seconds)
+	auditf(r, "settings.interval", fmt.Sprint(body.Seconds), fmt.Sprintf("check-in interval set to %ds", body.Seconds))
+	s.log.Info("check-in interval changed", "seconds", body.Seconds, "by", adminUser(r))
 	writeJSON(w, http.StatusOK, map[string]any{"seconds": body.Seconds})
 }
 
@@ -528,18 +535,15 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "could not rotate token", err)
 		return
 	}
-	s.log.Info("enrollment token rotated")
+	auditf(r, "settings.rotate-token", "", "enrollment token rotated")
+	s.log.Info("enrollment token rotated", "by", adminUser(r))
 	writeJSON(w, http.StatusOK, map[string]any{"enroll_token": tok})
 }
 
 // --- web UI ---
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "dashboard.html", map[string]any{
-		"Page":    "dashboard",
-		"Version": Version,
-		"User":    userFrom(r),
-	})
+	s.render(w, "dashboard.html", s.pageData(r, "dashboard", nil))
 }
 
 func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
@@ -558,17 +562,14 @@ func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
 		autoUpdate = true
 	}
 
-	s.render(w, "deployment.html", map[string]any{
-		"Page":        "deployment",
-		"Version":     Version,
-		"User":        userFrom(r),
+	s.render(w, "deployment.html", s.pageData(r, "deployment", map[string]any{
 		"AutoUpdate":  autoUpdate,
 		"ServerURL":   s.publicURL(r),
 		"EnrollToken": token,
 		"Interval":    interval,
 		"Builds":      s.availableBuilds(),
 		"DistDir":     s.cfg.DistDir,
-	})
+	}))
 }
 
 // build describes one agent binary available for download.

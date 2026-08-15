@@ -27,8 +27,13 @@ func userFrom(r *http.Request) store.User {
 
 // adminOnlyPaths are readable only by administrators. Everything else follows
 // the general rule below — read-only accounts may GET but never change — but
-// account management is not something a read-only operator should even see.
-var adminOnlyPaths = []string{"/settings", "/api/users"}
+// account management and the audit trail are not things a read-only operator
+// should see at all.
+//
+// Unlike the write rule, this list does not maintain itself: a new admin-only
+// page has to be added here by hand. TestAdminOnlyPagesAreGated exists to catch
+// the case where someone forgets, which has already happened once.
+var adminOnlyPaths = []string{"/settings", "/api/users", "/audit", "/api/audit"}
 
 // requireAuth gates the whole admin surface on a login, and enforces the
 // read-only role.
@@ -95,9 +100,7 @@ func (s *Server) redirectOrJSON(w http.ResponseWriter, r *http.Request, path, me
 func (s *Server) forbidden(w http.ResponseWriter, r *http.Request, message string) {
 	if wantsHTML(r) {
 		w.WriteHeader(http.StatusForbidden)
-		s.render(w, "forbidden.html", map[string]any{
-			"Page": "", "Version": Version, "Message": message, "User": userFrom(r),
-		})
+		s.render(w, "forbidden.html", s.pageData(r, "", map[string]any{"Message": message}))
 		return
 	}
 	writeJSON(w, http.StatusForbidden, proto.Error{Error: message})
@@ -160,6 +163,11 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	s.setSessionCookie(w, r, token)
 
 	s.log.Info("first administrator created", "username", user.Username)
+	s.audit(r, store.AuditEntry{
+		Username: user.Username, Role: user.Role, Action: "account.create",
+		Target: user.Username, Detail: "first administrator, created during setup",
+		Status: http.StatusOK,
+	})
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -194,6 +202,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	user, err := s.st.AuthenticateUser(r.Context(), body.Username, body.Password)
 	if err != nil {
 		s.log.Warn("failed login", "username", body.Username, "remote", clientIP(r))
+		s.audit(r, store.AuditEntry{
+			Username: body.Username, Action: "auth.login-failed",
+			Detail: "invalid username or password", Status: http.StatusUnauthorized,
+		})
 		writeJSON(w, http.StatusUnauthorized, proto.Error{Error: store.ErrBadCredentials.Error()})
 		return
 	}
@@ -206,10 +218,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.setSessionCookie(w, r, token)
 
 	s.log.Info("signed in", "username", user.Username, "role", user.Role, "remote", clientIP(r))
+	s.audit(r, store.AuditEntry{
+		Username: user.Username, Role: user.Role, Action: "auth.login", Status: http.StatusOK,
+	})
 	writeJSON(w, http.StatusOK, user)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if user, err := s.currentUser(r); err == nil {
+		s.audit(r, store.AuditEntry{
+			Username: user.Username, Role: user.Role, Action: "auth.logout", Status: http.StatusOK,
+		})
+	}
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		if err := s.st.DeleteSession(r.Context(), c.Value); err != nil {
 			s.log.Error("could not delete session", "error", err)
@@ -262,6 +282,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, proto.Error{Error: err.Error()})
 		return
 	}
+	auditf(r, "account.create", user.Username, "role "+user.Role)
 	s.log.Info("account created", "username", user.Username, "role", user.Role, "by", adminUser(r))
 	writeJSON(w, http.StatusOK, user)
 }
@@ -281,6 +302,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, proto.Error{Error: err.Error()})
 		return
 	}
+	auditf(r, "account.delete", id, "account removed and its sessions ended")
 	s.log.Info("account deleted", "id", id, "by", adminUser(r))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -309,6 +331,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, proto.Error{Error: err.Error()})
 			return
 		}
+		auditf(r, "account.role", id, "role changed to "+body.Role)
 		s.log.Info("account role changed", "id", id, "role", body.Role, "by", adminUser(r))
 	}
 
@@ -321,6 +344,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, proto.Error{Error: err.Error()})
 			return
 		}
+		auditf(r, "account.password", id, "password changed and other sessions ended")
 		s.log.Info("account password changed", "id", id, "by", adminUser(r))
 	}
 
@@ -333,9 +357,49 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "settings.html", map[string]any{
-		"Page":    "settings",
-		"Version": Version,
-		"User":    userFrom(r),
-	})
+	theme, _ := s.st.Theme(r.Context())
+	tz, _ := s.st.Timezone(r.Context())
+	s.render(w, "settings.html", s.pageData(r, "settings", map[string]any{
+		"Themes":   store.Themes,
+		"Theme":    theme,
+		"Timezone": tz,
+		"Zones":    commonZones,
+	}))
+}
+
+// pageData assembles what every page needs: who is signed in, and the display
+// settings the layout and scripts depend on. Centralised so a new page cannot
+// accidentally render without a theme or with the wrong time zone.
+func (s *Server) pageData(r *http.Request, page string, extra map[string]any) map[string]any {
+	theme, err := s.st.Theme(r.Context())
+	if err != nil {
+		theme = store.DefaultTheme
+	}
+	tz, err := s.st.Timezone(r.Context())
+	if err != nil {
+		tz = "UTC"
+	}
+
+	data := map[string]any{
+		"Page":     page,
+		"Version":  Version,
+		"User":     userFrom(r),
+		"Theme":    theme,
+		"Timezone": tz,
+	}
+	for k, v := range extra {
+		data[k] = v
+	}
+	return data
+}
+
+// audit records an entry for a request outside the change-recording middleware
+// — the sign-in and setup routes, which are reachable without a session.
+func (s *Server) audit(r *http.Request, e store.AuditEntry) {
+	e.Method = r.Method
+	e.Path = r.URL.Path
+	e.IP = clientIP(r)
+	if err := s.st.AppendAudit(r.Context(), e); err != nil {
+		s.log.Error("could not write audit entry", "action", e.Action, "error", err)
+	}
 }

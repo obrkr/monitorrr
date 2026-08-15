@@ -110,6 +110,7 @@ func (s *Server) handleUploadPayload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditf(r, "file.upload", filename, fmt.Sprintf("%d bytes, sha256 %s", size, digest[:12]))
 	s.log.Info("payload uploaded", "id", id, "filename", filename,
 		"bytes", size, "sha256", digest, "by", adminUser(r))
 	writeJSON(w, http.StatusOK, payload)
@@ -138,6 +139,7 @@ func (s *Server) handleDeletePayload(w http.ResponseWriter, r *http.Request) {
 	if err := os.Remove(s.payloadPath(id)); err != nil && !os.IsNotExist(err) {
 		s.log.Error("payload row deleted but the file remains", "id", id, "error", err)
 	}
+	auditf(r, "file.delete", id, "uploaded file deleted")
 	s.log.Info("payload deleted", "id", id, "by", adminUser(r))
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -2,8 +2,10 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/ollie/monitorrr/internal/proto"
 	"github.com/ollie/monitorrr/internal/store"
@@ -80,6 +82,8 @@ func (s *Server) handleSaveScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditf(r, "script.save", script.Name,
+		fmt.Sprintf("%s script, timeout %ds, sha256 %s", script.Interpreter, script.TimeoutSecs, script.SHA256[:12]))
 	s.log.Info("script saved", "id", script.ID, "name", script.Name,
 		"interpreter", script.Interpreter, "sha256", script.SHA256, "by", adminUser(r))
 	writeJSON(w, http.StatusOK, script)
@@ -95,6 +99,7 @@ func (s *Server) handleDeleteScript(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "could not delete script", err)
 		return
 	}
+	auditf(r, "script.delete", id, "")
 	s.log.Info("script deleted", "id", id, "by", adminUser(r))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -126,6 +131,10 @@ func (s *Server) handleDispatch(w http.ResponseWriter, r *http.Request) {
 	for _, j := range jobs {
 		s.log.Info("job queued", "job", j.ID, "script", j.ScriptName, "sha256", j.ScriptSHA256,
 			"device", j.DeviceHostname, "by", by)
+	}
+	if len(jobs) > 0 {
+		auditf(r, "script.run", jobs[0].ScriptName,
+			fmt.Sprintf("queued on %d device(s), sha256 %s", len(jobs), jobs[0].ScriptSHA256[:12]))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "queued": len(jobs)})
 }
@@ -247,26 +256,25 @@ func (s *Server) handleDeviceDispatch(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("job queued", "job", j.ID, "script", j.ScriptName, "sha256", j.ScriptSHA256,
 			"device", j.DeviceHostname, "by", by)
 	}
+	if len(jobs) > 0 {
+		auditf(r, "script.run", jobs[0].ScriptName,
+			fmt.Sprintf("on %s, sha256 %s", jobs[0].DeviceHostname, jobs[0].ScriptSHA256[:12]))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "queued": len(jobs)})
 }
 
 func (s *Server) handleDevicePage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "device.html", map[string]any{
-		"Page":     "devices",
-		"Version":  Version,
-		"User":     userFrom(r),
+	s.render(w, "device.html", s.pageData(r, "devices", map[string]any{
 		"DeviceID": r.PathValue("id"),
-	})
+	}))
 }
 
 func (s *Server) handleScriptsPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "scripts.html", map[string]any{
-		"Page": "scripts", "Version": Version, "User": userFrom(r)})
+	s.render(w, "scripts.html", s.pageData(r, "scripts", nil))
 }
 
 func (s *Server) handleRunsPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "runs.html", map[string]any{
-		"Page": "runs", "Version": Version, "User": userFrom(r)})
+	s.render(w, "runs.html", s.pageData(r, "runs", nil))
 }
 
 // adminUser names whoever performed an action, for the audit trail.
@@ -296,6 +304,7 @@ func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "could not set tags", err)
 		return
 	}
+	auditf(r, "device.tags", r.PathValue("id"), "tags set to "+strings.Join(tags, ", "))
 	s.log.Info("device tags updated", "id", r.PathValue("id"), "tags", tags, "by", adminUser(r))
 	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
 }

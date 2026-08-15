@@ -12,6 +12,10 @@ import (
 	"path/filepath"
 	"syscall"
 
+	// The IANA database is embedded so display time zones work on a host that
+	// has no system zoneinfo — a slim container, or Windows.
+	_ "time/tzdata"
+
 	"github.com/ollie/monitorrr/internal/server"
 	"github.com/ollie/monitorrr/internal/store"
 )

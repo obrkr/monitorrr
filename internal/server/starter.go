@@ -109,6 +109,8 @@ func (s *Server) handleImportStarterScripts(w http.ResponseWriter, r *http.Reque
 		imported = append(imported, st.Name)
 	}
 
+	auditf(r, "script.import-starters", "",
+		fmt.Sprintf("added %d script(s), %d already present", len(imported), len(skipped)))
 	s.log.Info("starter scripts imported", "added", len(imported),
 		"already_present", len(skipped), "by", adminUser(r))
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -52,6 +52,7 @@ func (s *Server) handleRequestCollection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	auditf(r, "file.collect", c.DeviceHostname, "requested "+c.Path)
 	s.log.Info("file collection requested", "collection", c.ID,
 		"device", c.DeviceHostname, "path", c.Path, "by", by)
 	writeJSON(w, http.StatusOK, c)
@@ -113,6 +114,7 @@ func (s *Server) handleDeleteCollection(w http.ResponseWriter, r *http.Request) 
 	if err := os.Remove(s.collectPath(id)); err != nil && !os.IsNotExist(err) {
 		s.log.Error("collection row deleted but the file remains", "id", id, "error", err)
 	}
+	auditf(r, "file.collect-delete", id, "collected file deleted")
 	s.log.Info("collection deleted", "id", id, "by", adminUser(r))
 	w.WriteHeader(http.StatusNoContent)
 }

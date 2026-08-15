@@ -36,6 +36,33 @@ function esc(s) {
   })[c]);
 }
 
+// The instance-wide display zone, set in Settings. Falls back to UTC, never to
+// the browser's zone: two people reading the same timestamp must see the same
+// time, whichever machine they are sitting at.
+const DISPLAY_TZ = document.documentElement.dataset.timezone || "UTC";
+
+const dateTimeFormat = new Intl.DateTimeFormat("en-GB", {
+  timeZone: DISPLAY_TZ,
+  year: "numeric", month: "short", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+  hour12: false,
+});
+
+const dateFormat = new Intl.DateTimeFormat("en-GB", {
+  timeZone: DISPLAY_TZ, year: "numeric", month: "short", day: "2-digit",
+});
+
+// fmtTime renders an instant in the configured zone.
+function fmtTime(iso) {
+  if (!iso) return "—";
+  return dateTimeFormat.format(new Date(iso));
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  return dateFormat.format(new Date(iso));
+}
+
 function relTime(iso) {
   const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (secs < 10) return "just now";
@@ -265,7 +292,7 @@ if (devicesBody) {
     list.innerHTML = events
       .map(
         (ev) => `<li>
-          <span class="ev-time">${new Date(ev.ts).toLocaleString()}</span>
+          <span class="ev-time">${fmtTime(ev.ts)}</span>
           <span class="ev-host">${esc(ev.hostname)}</span>
           <span class="ev-kind ev-${esc(ev.kind)}">${esc(ev.kind)}</span>
           <span class="ev-detail">${esc(ev.detail)}</span>
@@ -420,8 +447,8 @@ if (devicePanel) {
       <label>Agent</label><div class="field"><code>${esc(dev.agent_version || "—")}</code></div>
       <label>Capabilities</label><div class="field"><code>${esc((dev.features || []).join(", ") || "none advertised")}</code></div>
       <label>Check-in every</label><div class="field"><code>${dev.interval_seconds}s</code></div>
-      <label>Last seen</label><div class="field"><code>${relTime(dev.last_seen)}</code> <span class="muted">${new Date(dev.last_seen).toLocaleString()}</span></div>
-      <label>Enrolled</label><div class="field"><span class="muted">${new Date(dev.enrolled_at).toLocaleString()}</span></div>
+      <label>Last seen</label><div class="field"><code>${relTime(dev.last_seen)}</code> <span class="muted">${fmtTime(dev.last_seen)}</span></div>
+      <label>Enrolled</label><div class="field"><span class="muted">${fmtTime(dev.enrolled_at)}</span></div>
       <label>Device ID</label><div class="field"><code>${esc(dev.id)}</code></div>
       <label>Tags</label>
       <div class="field">
@@ -583,7 +610,7 @@ if (devicePanel) {
     list.innerHTML = events
       .map(
         (ev) => `<li>
-          <span class="ev-time">${new Date(ev.ts).toLocaleString()}</span>
+          <span class="ev-time">${fmtTime(ev.ts)}</span>
           <span class="ev-kind ev-${esc(ev.kind)}">${esc(ev.kind)}</span>
           <span class="ev-detail">${esc(ev.detail)}</span>
         </li>`
@@ -976,7 +1003,7 @@ if (usersBody) {
                 <option value="readonly" ${u.role === "readonly" ? "selected" : ""}>read-only</option>
               </select>
             </td>
-            <td class="muted">${new Date(u.created_at).toLocaleDateString()}</td>
+            <td class="muted">${fmtDate(u.created_at)}</td>
             <td class="muted">${u.last_login ? relTime(u.last_login) : "never"}</td>
             <td class="row-actions">
               <button class="link" data-password-for="${esc(u.id)}" data-name="${esc(u.username)}">Set password</button>
@@ -1098,7 +1125,155 @@ if (usersBody) {
     }
   });
 
+  const themeSelect = $("#theme");
+  if (themeSelect) {
+    themeSelect.addEventListener("change", async (e) => {
+      const theme = e.target.value;
+      try {
+        await api("/api/settings/theme", {
+          method: "POST",
+          body: JSON.stringify({ theme }),
+        });
+        // Applied immediately rather than on the next page load, so the choice
+        // can actually be judged.
+        document.documentElement.dataset.theme = theme;
+        toast(`Theme set to ${theme}`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
+
+  const saveTimezone = $("#save-timezone");
+  if (saveTimezone) {
+    saveTimezone.addEventListener("click", async () => {
+      try {
+        const res = await api("/api/settings/timezone", {
+          method: "POST",
+          body: JSON.stringify({ timezone: $("#timezone").value }),
+        });
+        toast(`Times now shown in ${res.timezone} — reload to apply`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
+
   loadUsers();
+}
+
+// ---- audit ----
+
+const auditRows = $("#audit-rows");
+
+if (auditRows) {
+  let oldest = 0;
+  let filters = { q: "", action: "", username: "" };
+
+  // Destructive and security-relevant actions are picked out, so a long log
+  // still shows the things worth noticing.
+  const DANGER = ["admin.reset", "admin.retire-all", "device.retire", "device.delete",
+                  "script.run", "account.delete", "account.role", "settings.rotate-token"];
+
+  function actionClass(entry) {
+    if (entry.action.endsWith("-failed")) return "audit-action audit-failed";
+    if (DANGER.includes(entry.action)) return "audit-action audit-danger";
+    return "audit-action";
+  }
+
+  function rowsFor(entries) {
+    return entries
+      .map(
+        (e) => `<tr>
+          <td class="audit-when">${fmtTime(e.ts)}</td>
+          <td>${esc(e.username)}${e.role ? ` <span class="muted">${esc(e.role)}</span>` : ""}</td>
+          <td><span class="${actionClass(e)}">${esc(e.action)}</span></td>
+          <td>${esc(e.target || "—")}</td>
+          <td class="audit-detail">${esc(e.detail || "")}</td>
+          <td class="muted">${esc(e.ip)}</td>
+        </tr>`
+      )
+      .join("");
+  }
+
+  function query(before) {
+    const p = new URLSearchParams();
+    if (filters.q) p.set("q", filters.q);
+    if (filters.action) p.set("action", filters.action);
+    if (filters.username) p.set("username", filters.username);
+    if (before) p.set("before", before);
+    p.set("limit", "100");
+    return "/api/audit?" + p.toString();
+  }
+
+  async function loadAudit() {
+    try {
+      const d = await api(query(0));
+      $("#audit-count").textContent = `${d.total} entries recorded`;
+
+      const select = $("#audit-action");
+      if (document.activeElement !== select) {
+        const current = select.value;
+        select.innerHTML =
+          '<option value="">All actions</option>' +
+          d.actions.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
+        select.value = current;
+      }
+
+      if (!d.entries.length) {
+        auditRows.innerHTML = '<tr class="empty"><td colspan="6">Nothing recorded yet.</td></tr>';
+        $("#audit-more").hidden = true;
+        return;
+      }
+      auditRows.innerHTML = rowsFor(d.entries);
+      oldest = d.entries[d.entries.length - 1].id;
+      $("#audit-more").hidden = d.entries.length < 100;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  $("#audit-more").addEventListener("click", async () => {
+    try {
+      const d = await api(query(oldest));
+      if (!d.entries.length) {
+        $("#audit-more").hidden = true;
+        return;
+      }
+      auditRows.insertAdjacentHTML("beforeend", rowsFor(d.entries));
+      oldest = d.entries[d.entries.length - 1].id;
+      $("#audit-more").hidden = d.entries.length < 100;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  let debounce;
+  function onFilterChange() {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      filters = {
+        q: $("#audit-search").value.trim(),
+        action: $("#audit-action").value,
+        username: $("#audit-user").value.trim(),
+      };
+      loadAudit();
+    }, 200);
+  }
+
+  $("#audit-search").addEventListener("input", onFilterChange);
+  $("#audit-action").addEventListener("change", onFilterChange);
+  $("#audit-user").addEventListener("input", onFilterChange);
+  $("#audit-clear").addEventListener("click", () => {
+    $("#audit-search").value = "";
+    $("#audit-action").value = "";
+    $("#audit-user").value = "";
+    onFilterChange();
+  });
+
+  loadAudit();
+  // Slower than the dashboard: an audit log is reviewed, not watched.
+  setInterval(loadAudit, 15000);
 }
 
 // ---- deployment ----

@@ -126,10 +126,10 @@ func TestReadOnlyCanReadButNotWrite(t *testing.T) {
 		}
 	})
 
-	t.Run("account management is hidden entirely", func(t *testing.T) {
+	t.Run("admin-only pages are hidden entirely", func(t *testing.T) {
 		// Not merely unwritable: a read-only operator should not be able to
-		// enumerate the accounts either.
-		for _, path := range []string{"/settings", "/api/users"} {
+		// enumerate accounts or read the audit trail either.
+		for _, path := range []string{"/settings", "/api/users", "/audit", "/api/audit"} {
 			if rec := do(srv, http.MethodGet, path, viewer); rec.Code != http.StatusForbidden {
 				t.Errorf("GET %s as read-only = %d, want 403", path, rec.Code)
 			}
@@ -150,6 +150,26 @@ func TestAdminCanReachEverything(t *testing.T) {
 	// (400 is fine here — the empty body is invalid — 403 is not.)
 	if rec := do(srv, http.MethodPost, "/api/settings/interval", admin); rec.Code == http.StatusForbidden {
 		t.Error("an admin was refused a settings change")
+	}
+}
+
+// Hiding a page in the navigation is presentation, not access control. This
+// asserts that every page an admin-only link points at is actually gated in the
+// middleware — the mistake this catches was real: /audit was hidden from the
+// menu but served to anyone who typed the URL.
+func TestAdminOnlyPagesAreGated(t *testing.T) {
+	srv, st := testServer(t)
+	signIn(t, srv, st, "ollie", store.RoleAdmin)
+	viewer := signIn(t, srv, st, "viewer", store.RoleReadOnly)
+
+	// Every path the layout renders only for admins, plus its API.
+	adminPages := []string{"/settings", "/audit", "/api/users", "/api/audit"}
+	for _, path := range adminPages {
+		rec := do(srv, http.MethodGet, path, viewer)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("GET %s as read-only = %d, want 403 — hidden in the menu is not the same as gated",
+				path, rec.Code)
+		}
 	}
 }
 
@@ -192,4 +212,13 @@ func TestAgentEndpointsDoNotRequireLogin(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "not signed in") {
 		t.Error("an agent endpoint answered with an operator login error")
 	}
+}
+
+// postJSON issues an unauthenticated JSON POST, for the sign-in routes.
+func postJSON(srv *Server, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	return rec
 }

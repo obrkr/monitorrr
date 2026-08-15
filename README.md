@@ -263,6 +263,41 @@ administrator cannot be recovered through the UI at all.
 Agents are unaffected: they authenticate with their own per-device tokens, so
 adding operator accounts does not disturb the fleet.
 
+## Audit trail
+
+Every state-changing request made through the console is recorded: who, what,
+when, from where, and enough detail to know what actually happened. Sign-ins and
+failed sign-in attempts are recorded too — a trail that shows only successful
+access misses the part worth reviewing.
+
+It is middleware, not a call in each handler, for the same reason the read-only
+rule is: anything that changes state is a POST, PATCH or DELETE, so covering
+those covers everything by construction. A new endpoint is audited the moment it
+is added, not the moment someone remembers to instrument it. Handlers can enrich
+their entry with detail, and where none is given the action name is derived from
+the route, so an un-annotated endpoint still records something meaningful.
+
+Reads are not recorded — the log would be nothing but noise — and neither are
+refused requests, since recording them would make the log describe things that
+never happened.
+
+The Audit page is admin-only, filterable by user, action and free text.
+
+## Appearance and time
+
+Settings carries two display options that apply to everyone using the instance:
+
+- **Theme** — dark (default), light, system, Nord, Dracula, Solarized Dark or
+  Gruvbox. Each is a set of CSS variable overrides, so components follow
+  automatically. "system" is the only one that tracks the operating system's
+  light/dark setting; an explicit choice is not overridden by it.
+- **Time zone** — every timestamp in the console renders in this zone,
+  defaulting to **UTC** rather than the viewer's browser zone. A lab spans
+  machines in several places, and a timestamp is only comparable if everyone
+  reads it the same way. Any IANA name is accepted and validated before it is
+  stored; the zone database is embedded in the server binary so this works on a
+  host with no system zoneinfo.
+
 ## Decommissioning
 
 Two irreversible actions live under Settings, both requiring `RESET` to be typed

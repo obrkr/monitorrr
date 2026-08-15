@@ -88,6 +88,24 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
+-- Every change made through the console. Append-only by intention: an audit
+-- trail that can be edited from the thing it audits is not one.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts       INTEGER NOT NULL,
+  username TEXT NOT NULL DEFAULT '',
+  role     TEXT NOT NULL DEFAULT '',
+  action   TEXT NOT NULL,
+  target   TEXT NOT NULL DEFAULT '',
+  detail   TEXT NOT NULL DEFAULT '',
+  method   TEXT NOT NULL DEFAULT '',
+  path     TEXT NOT NULL DEFAULT '',
+  status   INTEGER NOT NULL DEFAULT 0,
+  ip       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username, id DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL

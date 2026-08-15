@@ -42,6 +42,37 @@
   </form>
 </section>
 
+<section class="panel">
+  <div class="panel-head">
+    <h2>Appearance and time</h2>
+    <span class="muted">applies to everyone using this instance</span>
+  </div>
+  <div class="field-grid">
+    <label for="theme">Theme</label>
+    <div class="field">
+      <select id="theme">
+        {{range .Themes}}<option value="{{.}}" {{if eq . $.Theme}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+      <span class="muted">"system" follows the operating system's light or dark setting</span>
+    </div>
+
+    <label for="timezone">Time zone</label>
+    <div class="field">
+      <input type="text" id="timezone" list="zones" value="{{.Timezone}}" spellcheck="false">
+      <datalist id="zones">
+        {{range .Zones}}<option value="{{.}}">{{end}}
+      </datalist>
+      <button type="button" id="save-timezone">Save</button>
+    </div>
+  </div>
+  <p class="note">
+    Every timestamp in the console is shown in this zone. It defaults to UTC
+    rather than the server's own zone: a lab spans machines in different places,
+    and timestamps are only comparable if everyone reads them the same way. Any
+    IANA name works, not just the suggestions.
+  </p>
+</section>
+
 <section class="panel danger-zone">
   <div class="panel-head">
     <h2>Decommissioning</h2>

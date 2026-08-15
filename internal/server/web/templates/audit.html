@@ -1,0 +1,35 @@
+{{define "audit.html"}}
+{{template "head" .}}
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Audit log</h2>
+    <span class="muted" id="audit-count">every change made through the console</span>
+  </div>
+
+  <div class="filter-bar">
+    <input type="search" id="audit-search" placeholder="Filter by target, detail or path…">
+    <select id="audit-action"><option value="">All actions</option></select>
+    <input type="text" id="audit-user" placeholder="username">
+    <button type="button" id="audit-clear" class="ghost">Clear</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th><th>From</th></tr>
+      </thead>
+      <tbody id="audit-rows"><tr class="empty"><td colspan="6">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <div class="editor-actions">
+    <button type="button" id="audit-more" class="ghost" hidden>Load older entries</button>
+  </div>
+  <p class="note">
+    Records every state-changing request, plus sign-ins and failed sign-in
+    attempts. Reads are not recorded — the log would be nothing but noise.
+  </p>
+</section>
+
+{{template "foot" .}}
+{{end}}
