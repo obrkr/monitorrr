@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,10 +21,14 @@ import (
 // runaway script from filling the network and the server's database.
 const maxOutput = 64 * 1024
 
+// fetchPayload downloads a job's attached file to dest. It is a parameter
+// rather than a hard dependency so execution can be tested without a server.
+type fetchPayload func(ctx context.Context, jobID, dest string) error
+
 // runJob executes one dispatched script and always returns a result — an
 // execution that could not start is reported through JobResult.Error rather
 // than as a Go error, because the server needs a record either way.
-func runJob(ctx context.Context, job proto.Job) proto.JobResult {
+func runJob(ctx context.Context, job proto.Job, fetch fetchPayload) proto.JobResult {
 	start := time.Now()
 	result := proto.JobResult{ExitCode: -1}
 	finish := func() proto.JobResult {
@@ -46,6 +51,24 @@ func runJob(ctx context.Context, job proto.Job) proto.JobResult {
 	}
 	defer cleanup()
 
+	// A job may carry a file — an installer, a package — that the script acts
+	// on. It is fetched into a private directory and handed over by path, so
+	// the script decides what to do with it.
+	var payloadPath string
+	if job.PayloadName != "" {
+		if fetch == nil {
+			result.Error = "job has an attached file but this agent cannot fetch it"
+			return finish()
+		}
+		var release func()
+		payloadPath, release, err = downloadPayload(ctx, job, fetch)
+		if err != nil {
+			result.Error = err.Error()
+			return finish()
+		}
+		defer release()
+	}
+
 	name, args, err := interpreterCommand(job.Interpreter, path)
 	if err != nil {
 		result.Error = err.Error()
@@ -66,6 +89,13 @@ func runJob(ctx context.Context, job proto.Job) proto.JobResult {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Dir = os.TempDir()
+	if payloadPath != "" {
+		// Passed by environment rather than as an argument so the same variable
+		// works identically for sh and PowerShell scripts.
+		cmd.Env = append(os.Environ(),
+			"MONITORRR_PAYLOAD="+payloadPath,
+			"MONITORRR_PAYLOAD_NAME="+job.PayloadName)
+	}
 
 	// A script is a process tree, not a process: `sh -c 'sleep 30'` leaves the
 	// sleep running if only the shell is killed, and because that grandchild
@@ -193,4 +223,54 @@ func (w *capWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return string(w.buf)
+}
+
+// downloadPayload fetches a job's file into a private directory and verifies it.
+// The directory is removed when the returned function is called.
+func downloadPayload(ctx context.Context, job proto.Job, fetch fetchPayload) (path string, release func(), err error) {
+	dir, err := os.MkdirTemp("", "monitorrr-payload-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("create payload directory: %w", err)
+	}
+	release = func() { os.RemoveAll(dir) }
+
+	// Keep the original filename: installers frequently care about their own
+	// extension, and a script referring to it reads better in the log.
+	path = filepath.Join(dir, filepath.Base(job.PayloadName))
+	if err := fetch(ctx, job.ID, path); err != nil {
+		release()
+		return "", nil, fmt.Errorf("download %s: %w", job.PayloadName, err)
+	}
+
+	sum, err := hashFile(path)
+	if err != nil {
+		release()
+		return "", nil, err
+	}
+	if job.PayloadSHA256 != "" && sum != job.PayloadSHA256 {
+		release()
+		return "", nil, fmt.Errorf("payload checksum mismatch: server sent %s, computed %s",
+			job.PayloadSHA256, sum)
+	}
+
+	// Executable: the pushed file is very often an installer meant to be run.
+	if err := os.Chmod(path, 0o700); err != nil {
+		release()
+		return "", nil, fmt.Errorf("chmod payload: %w", err)
+	}
+	return path, release, nil
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open payload: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash payload: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

@@ -48,6 +48,11 @@ type Script struct {
 	TimeoutSecs int       `json:"timeout_seconds"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// PayloadID is an optional file pushed to the device before the script runs.
+	PayloadID       string `json:"payload_id,omitempty"`
+	PayloadFilename string `json:"payload_filename,omitempty"`
+	PayloadSize     int64  `json:"payload_size,omitempty"`
+	PayloadSHA256   string `json:"payload_sha256,omitempty"`
 }
 
 // Job is one dispatch of a script to one device.
@@ -71,6 +76,8 @@ type Job struct {
 	Error          string     `json:"error"`
 	DurationMS     int64      `json:"duration_ms"`
 	Truncated      bool       `json:"truncated"`
+	PayloadName    string     `json:"payload_name,omitempty"`
+	PayloadSHA256  string     `json:"payload_sha256,omitempty"`
 	// Content is populated only by GetJob — it is the snapshot of what actually
 	// ran, which is the point of the audit trail.
 	Content string `json:"content,omitempty"`
@@ -136,6 +143,8 @@ func (s *Store) SaveScript(ctx context.Context, id, name, description, interpret
 		}, nil
 	}
 
+	// payload_id is deliberately untouched: attaching is its own operation, and
+	// editing a script's text must not silently drop its file.
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE scripts SET name = ?, description = ?, interpreter = ?, content = ?,
 		 sha256 = ?, timeout_seconds = ?, updated_at = ? WHERE id = ?`,
@@ -156,10 +165,13 @@ func (s *Store) GetScript(ctx context.Context, id string) (Script, error) {
 		created, updated int64
 	)
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, name, description, interpreter, content, sha256, timeout_seconds, created_at, updated_at
-		 FROM scripts WHERE id = ?`, id,
+		`SELECT s.id, s.name, s.description, s.interpreter, s.content, s.sha256, s.timeout_seconds,
+		        s.created_at, s.updated_at, COALESCE(s.payload_id, ''),
+		        COALESCE(p.filename, ''), COALESCE(p.size, 0), COALESCE(p.sha256, '')
+		 FROM scripts s LEFT JOIN payloads p ON p.id = s.payload_id WHERE s.id = ?`, id,
 	).Scan(&sc.ID, &sc.Name, &sc.Description, &sc.Interpreter, &sc.Content,
-		&sc.SHA256, &sc.TimeoutSecs, &created, &updated)
+		&sc.SHA256, &sc.TimeoutSecs, &created, &updated,
+		&sc.PayloadID, &sc.PayloadFilename, &sc.PayloadSize, &sc.PayloadSHA256)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Script{}, ErrNotFound
 	}
@@ -174,8 +186,11 @@ func (s *Store) GetScript(ctx context.Context, id string) (Script, error) {
 // ListScripts returns all scripts, newest first.
 func (s *Store) ListScripts(ctx context.Context) ([]Script, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, description, interpreter, content, sha256, timeout_seconds, created_at, updated_at
-		 FROM scripts ORDER BY updated_at DESC`)
+		`SELECT s.id, s.name, s.description, s.interpreter, s.content, s.sha256, s.timeout_seconds,
+		        s.created_at, s.updated_at, COALESCE(s.payload_id, ''),
+		        COALESCE(p.filename, ''), COALESCE(p.size, 0), COALESCE(p.sha256, '')
+		 FROM scripts s LEFT JOIN payloads p ON p.id = s.payload_id
+		 ORDER BY s.updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list scripts: %w", err)
 	}
@@ -188,7 +203,8 @@ func (s *Store) ListScripts(ctx context.Context) ([]Script, error) {
 			created, updated int64
 		)
 		if err := rows.Scan(&sc.ID, &sc.Name, &sc.Description, &sc.Interpreter, &sc.Content,
-			&sc.SHA256, &sc.TimeoutSecs, &created, &updated); err != nil {
+			&sc.SHA256, &sc.TimeoutSecs, &created, &updated,
+			&sc.PayloadID, &sc.PayloadFilename, &sc.PayloadSize, &sc.PayloadSHA256); err != nil {
 			return nil, fmt.Errorf("scan script: %w", err)
 		}
 		sc.CreatedAt = time.Unix(created, 0)
@@ -255,18 +271,26 @@ func (s *Store) Dispatch(ctx context.Context, scriptID string, deviceIDs []strin
 		if err != nil {
 			return nil, err
 		}
+		var payloadArg any
+		if script.PayloadID != "" {
+			payloadArg = script.PayloadID
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO jobs (id, script_id, script_name, script_content, script_sha256, interpreter,
-			 timeout_seconds, device_id, device_hostname, state, created_by, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 timeout_seconds, device_id, device_hostname, state, created_by, created_at,
+			 payload_id, payload_name, payload_sha256)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, script.ID, script.Name, script.Content, script.SHA256, script.Interpreter,
 			script.TimeoutSecs, deviceID, hostname, JobQueued, createdBy, now.Unix(),
+			payloadArg, script.PayloadFilename, script.PayloadSHA256,
 		); err != nil {
 			return nil, fmt.Errorf("queue job: %w", err)
 		}
 
 		jobs = append(jobs, Job{
-			ID: id, ScriptID: script.ID, ScriptName: script.Name, ScriptSHA256: script.SHA256,
+			PayloadName:   script.PayloadFilename,
+			PayloadSHA256: script.PayloadSHA256,
+			ID:            id, ScriptID: script.ID, ScriptName: script.Name, ScriptSHA256: script.SHA256,
 			Interpreter: script.Interpreter, TimeoutSecs: script.TimeoutSecs,
 			DeviceID: deviceID, DeviceHostname: hostname, State: JobQueued,
 			CreatedBy: createdBy, CreatedAt: now,
@@ -289,7 +313,8 @@ func (s *Store) ClaimJobs(ctx context.Context, deviceID string) ([]Job, error) {
 	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT id, script_content, script_sha256, interpreter, timeout_seconds
+		`SELECT id, script_content, script_sha256, interpreter, timeout_seconds,
+		        payload_name, payload_sha256
 		 FROM jobs WHERE device_id = ? AND state = ? ORDER BY created_at`, deviceID, JobQueued)
 	if err != nil {
 		return nil, fmt.Errorf("read queued jobs: %w", err)
@@ -298,7 +323,8 @@ func (s *Store) ClaimJobs(ctx context.Context, deviceID string) ([]Job, error) {
 	var jobs []Job
 	for rows.Next() {
 		var j Job
-		if err := rows.Scan(&j.ID, &j.Content, &j.ScriptSHA256, &j.Interpreter, &j.TimeoutSecs); err != nil {
+		if err := rows.Scan(&j.ID, &j.Content, &j.ScriptSHA256, &j.Interpreter, &j.TimeoutSecs,
+			&j.PayloadName, &j.PayloadSHA256); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan queued job: %w", err)
 		}
@@ -387,7 +413,7 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]Job, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, COALESCE(script_id, ''), script_name, script_sha256, interpreter, timeout_seconds,
 		        device_id, device_hostname, state, created_by, created_at, dispatched_at, finished_at,
-		        exit_code, stdout, stderr, error, duration_ms, truncated
+		        exit_code, stdout, stderr, error, duration_ms, truncated, payload_name, payload_sha256
 		 FROM jobs ORDER BY created_at DESC, rowid DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
@@ -410,7 +436,8 @@ func (s *Store) GetJob(ctx context.Context, id string) (Job, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, COALESCE(script_id, ''), script_name, script_sha256, interpreter, timeout_seconds,
 		        device_id, device_hostname, state, created_by, created_at, dispatched_at, finished_at,
-		        exit_code, stdout, stderr, error, duration_ms, truncated, script_content
+		        exit_code, stdout, stderr, error, duration_ms, truncated, payload_name, payload_sha256,
+		        script_content
 		 FROM jobs WHERE id = ?`, id)
 
 	var (
@@ -421,7 +448,8 @@ func (s *Store) GetJob(ctx context.Context, id string) (Job, error) {
 	)
 	err := row.Scan(&j.ID, &j.ScriptID, &j.ScriptName, &j.ScriptSHA256, &j.Interpreter, &j.TimeoutSecs,
 		&j.DeviceID, &j.DeviceHostname, &j.State, &j.CreatedBy, &created, &dispatched, &finished,
-		&exitCode, &j.Stdout, &j.Stderr, &j.Error, &j.DurationMS, &truncated, &j.Content)
+		&exitCode, &j.Stdout, &j.Stderr, &j.Error, &j.DurationMS, &truncated,
+		&j.PayloadName, &j.PayloadSHA256, &j.Content)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
 	}
@@ -478,7 +506,8 @@ func scanJob(row scanner) (Job, error) {
 	)
 	if err := row.Scan(&j.ID, &j.ScriptID, &j.ScriptName, &j.ScriptSHA256, &j.Interpreter, &j.TimeoutSecs,
 		&j.DeviceID, &j.DeviceHostname, &j.State, &j.CreatedBy, &created, &dispatched, &finished,
-		&exitCode, &j.Stdout, &j.Stderr, &j.Error, &j.DurationMS, &truncated); err != nil {
+		&exitCode, &j.Stdout, &j.Stderr, &j.Error, &j.DurationMS, &truncated,
+		&j.PayloadName, &j.PayloadSHA256); err != nil {
 		return Job{}, fmt.Errorf("scan job: %w", err)
 	}
 	fillJobTimes(&j, created, dispatched, finished, exitCode, truncated)

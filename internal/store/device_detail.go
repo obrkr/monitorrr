@@ -98,7 +98,7 @@ func (s *Store) DeviceJobs(ctx context.Context, deviceID string, limit int) ([]J
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, COALESCE(script_id, ''), script_name, script_sha256, interpreter, timeout_seconds,
 		        device_id, device_hostname, state, created_by, created_at, dispatched_at, finished_at,
-		        exit_code, stdout, stderr, error, duration_ms, truncated
+		        exit_code, stdout, stderr, error, duration_ms, truncated, payload_name, payload_sha256
 		 FROM jobs WHERE device_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, deviceID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list device jobs: %w", err)

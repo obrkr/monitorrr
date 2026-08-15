@@ -113,6 +113,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/checkin", s.handleCheckin)
 	mux.HandleFunc("POST /v1/jobs/{id}/result", s.handleJobResult)
 	mux.HandleFunc("POST /v1/retire/ack", s.handleRetireAck)
+	mux.HandleFunc("GET /v1/payload/{job}", s.handleServePayload)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, "ok")
@@ -154,6 +155,10 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("POST /api/scripts", s.handleSaveScript)
 	admin.HandleFunc("DELETE /api/scripts/{id}", s.handleDeleteScript)
 	admin.HandleFunc("POST /api/scripts/{id}/dispatch", s.handleDispatch)
+	admin.HandleFunc("GET /api/payloads", s.handleListPayloads)
+	admin.HandleFunc("POST /api/payloads", s.handleUploadPayload)
+	admin.HandleFunc("DELETE /api/payloads/{id}", s.handleDeletePayload)
+	admin.HandleFunc("POST /api/scripts/{id}/payload", s.handleAttachPayload)
 	admin.HandleFunc("GET /api/jobs", s.handleListJobs)
 	admin.HandleFunc("GET /api/jobs/{id}", s.handleGetJob)
 	mux.Handle("/", s.requireAdmin(admin))
@@ -336,6 +341,10 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			Script:      j.Content,
 			SHA256:      j.ScriptSHA256,
 			TimeoutSecs: j.TimeoutSecs,
+			// Without these the agent runs the script with no file, which fails
+			// in a confusing way rather than not at all.
+			PayloadName:   j.PayloadName,
+			PayloadSHA256: j.PayloadSHA256,
 		})
 	}
 	if len(jobs) > 0 {

@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- Files pushed to devices alongside a script: installers, packages, bundles.
+-- Only metadata here; the bytes live on disk beside the database.
+CREATE TABLE IF NOT EXISTS payloads (
+  id         TEXT PRIMARY KEY,
+  filename   TEXT NOT NULL,
+  size       INTEGER NOT NULL,
+  sha256     TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  created_by TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS scripts (
   id              TEXT PRIMARY KEY,
   name            TEXT NOT NULL,
@@ -80,7 +91,9 @@ CREATE TABLE IF NOT EXISTS scripts (
   sha256          TEXT NOT NULL,
   timeout_seconds INTEGER NOT NULL DEFAULT 300,
   created_at      INTEGER NOT NULL,
-  updated_at      INTEGER NOT NULL
+  updated_at      INTEGER NOT NULL,
+  -- Optional file pushed to the device before the script runs.
+  payload_id      TEXT REFERENCES payloads(id) ON DELETE SET NULL
 );
 
 -- One row per (script, device) dispatch. The script body and hash are snapshot
@@ -106,7 +119,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   stderr          TEXT NOT NULL DEFAULT '',
   error           TEXT NOT NULL DEFAULT '',
   duration_ms     INTEGER NOT NULL DEFAULT 0,
-  truncated       INTEGER NOT NULL DEFAULT 0
+  truncated       INTEGER NOT NULL DEFAULT 0,
+  -- Snapshot of the attached file, so detaching or replacing it later cannot
+  -- change what an in-flight job receives or what the audit trail says ran.
+  payload_id      TEXT,
+  payload_name    TEXT NOT NULL DEFAULT '',
+  payload_sha256  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_pending ON jobs(device_id, state);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
@@ -228,6 +246,10 @@ func (s *Store) migrate() error {
 		{"devices", "retire_checkins", "ALTER TABLE devices ADD COLUMN retire_checkins INTEGER NOT NULL DEFAULT 0"},
 		{"devices", "public_ip", "ALTER TABLE devices ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''"},
 		{"devices", "tags", "ALTER TABLE devices ADD COLUMN tags TEXT NOT NULL DEFAULT ''"},
+		{"scripts", "payload_id", "ALTER TABLE scripts ADD COLUMN payload_id TEXT"},
+		{"jobs", "payload_id", "ALTER TABLE jobs ADD COLUMN payload_id TEXT"},
+		{"jobs", "payload_name", "ALTER TABLE jobs ADD COLUMN payload_name TEXT NOT NULL DEFAULT ''"},
+		{"jobs", "payload_sha256", "ALTER TABLE jobs ADD COLUMN payload_sha256 TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, c := range columns {
 		var n int

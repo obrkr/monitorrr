@@ -32,12 +32,13 @@ type EnrollResponse struct {
 // explicitly lets the server tell "will never act on this" apart from "has not
 // got round to it yet".
 const (
-	FeatureJobs   = "jobs"
-	FeatureRetire = "retire"
+	FeatureJobs     = "jobs"
+	FeatureRetire   = "retire"
+	FeaturePayloads = "payloads"
 )
 
 // AgentFeatures is what this build of the agent advertises.
-var AgentFeatures = []string{FeatureJobs, FeatureRetire}
+var AgentFeatures = []string{FeatureJobs, FeatureRetire, FeaturePayloads}
 
 // CheckinRequest is the heartbeat, sent every Interval seconds.
 type CheckinRequest struct {
@@ -65,6 +66,11 @@ type Job struct {
 	Script      string `json:"script"`
 	SHA256      string `json:"sha256"`
 	TimeoutSecs int    `json:"timeout_seconds"`
+	// PayloadName is set when a file must be pushed to the device before the
+	// script runs — an installer or package. The agent fetches the bytes from
+	// /v1/payload/{job id} and verifies them against PayloadSHA256.
+	PayloadName   string `json:"payload_name,omitempty"`
+	PayloadSHA256 string `json:"payload_sha256,omitempty"`
 }
 
 // JobResult is posted back to /v1/jobs/{id}/result once execution finishes.

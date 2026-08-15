@@ -45,6 +45,13 @@
         <textarea id="script-content" rows="14" spellcheck="false" required
           placeholder="#!/bin/sh&#10;set -eu&#10;echo &quot;disk usage:&quot;&#10;df -h /"></textarea>
       </div>
+      <div class="editor-row" id="payload-row" hidden>
+        <label>Attached file</label>
+        <div class="payload-picker">
+          <select id="script-payload"><option value="">No file</option></select>
+          <span class="muted" id="payload-hint"></span>
+        </div>
+      </div>
       <div class="editor-actions">
         <button type="submit" class="primary">Save</button>
         <button type="button" id="delete-script" class="danger" hidden>Delete</button>
@@ -53,9 +60,35 @@
   </div>
 </section>
 
+<section class="panel">
+  <div class="panel-head">
+    <h2>Files</h2>
+    <span class="muted">pushed to the device before the script runs — installers, packages, bundles</span>
+  </div>
+  <div class="upload-row">
+    <input type="file" id="payload-file">
+    <button type="button" id="upload-payload" class="primary">Upload</button>
+    <span class="muted" id="upload-status"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>File</th><th>Size</th><th>SHA-256</th><th>Used by</th><th>Uploaded</th><th></th></tr>
+      </thead>
+      <tbody id="payload-list"><tr class="empty"><td colspan="6">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note">
+    Attach a file to a script above, then dispatch it as usual. The agent
+    downloads the file, verifies its checksum, and passes the path to your
+    script as <code>$MONITORRR_PAYLOAD</code> (<code>$env:MONITORRR_PAYLOAD</code>
+    on Windows). The file is deleted from the device when the script finishes.
+  </p>
+</section>
+
 <p class="note">
-  Scripts are managed here and run from a device's page. Open a device from the
-  <a href="/">dashboard</a> to dispatch one.
+  Scripts are managed here and run from a device's page, or across many devices
+  from the <a href="/">dashboard</a>.
 </p>
 
 {{template "foot" .}}

@@ -589,14 +589,59 @@ if (scriptList) {
 
   const form = $("#script-form");
 
+  let payloads = [];
+
   async function load() {
     try {
-      const s = await api("/api/scripts");
+      const [s, p] = await Promise.all([api("/api/scripts"), api("/api/payloads")]);
       scripts = s.scripts;
+      payloads = p.payloads;
       renderList();
+      renderPayloads();
+      renderPayloadPicker();
     } catch (err) {
       toast(err.message, true);
     }
+  }
+
+  const humanSize = (n) =>
+    n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB`
+    : n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB`
+    : n >= 1024 ? `${(n / 1024).toFixed(1)} KB`
+    : `${n} B`;
+
+  function renderPayloads() {
+    const body = $("#payload-list");
+    if (!payloads.length) {
+      body.innerHTML = '<tr class="empty"><td colspan="6">No files uploaded yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = payloads
+      .map(
+        (p) => `<tr>
+          <td><code>${esc(p.filename)}</code></td>
+          <td class="muted">${humanSize(p.size)}</td>
+          <td class="device-id">${esc(p.sha256.slice(0, 16))}…</td>
+          <td class="muted">${esc((p.used_by || []).join(", ") || "—")}</td>
+          <td class="muted">${relTime(p.created_at)}</td>
+          <td><button class="link danger-link" data-delete-payload="${esc(p.id)}">Delete</button></td>
+        </tr>`
+      )
+      .join("");
+  }
+
+  function renderPayloadPicker() {
+    const sel = $("#script-payload");
+    if (document.activeElement === sel) return;
+    const chosen = current ? current.payload_id || "" : "";
+    sel.innerHTML =
+      '<option value="">No file</option>' +
+      payloads
+        .map((p) => `<option value="${esc(p.id)}" ${p.id === chosen ? "selected" : ""}>${esc(p.filename)} (${humanSize(p.size)})</option>`)
+        .join("");
+    $("#payload-hint").textContent = chosen
+      ? "pushed to the device, path in $MONITORRR_PAYLOAD"
+      : "optional — upload files below";
   }
 
   function renderList() {
@@ -628,7 +673,10 @@ if (scriptList) {
     $("#editor-title").textContent = script ? script.name : "New script";
     $("#script-hash").textContent = script ? `sha256 ${script.sha256.slice(0, 16)}…` : "";
     $("#delete-script").hidden = !script;
+    // Attaching only makes sense once a script exists to attach to.
+    $("#payload-row").hidden = !script;
     renderList();
+    renderPayloadPicker();
   }
 
   scriptList.addEventListener("click", (e) => {
@@ -656,6 +704,68 @@ if (scriptList) {
       scripts = s.scripts;
       loadScript(saved);
       toast("Script saved");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("#script-payload").addEventListener("change", async (e) => {
+    if (!current) return;
+    try {
+      const updated = await api(`/api/scripts/${current.id}/payload`, {
+        method: "POST",
+        body: JSON.stringify({ payload_id: e.target.value }),
+      });
+      current = updated;
+      await load();
+      loadScript(updated);
+      toast(e.target.value ? "File attached" : "File detached");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("#upload-payload").addEventListener("click", async () => {
+    const input = $("#payload-file");
+    if (!input.files.length) {
+      toast("Choose a file first", true);
+      return;
+    }
+    const file = input.files[0];
+    const form = new FormData();
+    form.append("file", file);
+
+    $("#upload-status").textContent = `Uploading ${file.name} (${humanSize(file.size)})…`;
+    try {
+      // Not via api(): the body is multipart, so the JSON content type the
+      // helper sets would corrupt the boundary.
+      const res = await fetch("/api/payloads", { method: "POST", body: form });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || res.statusText);
+      }
+      input.value = "";
+      $("#upload-status").textContent = "";
+      await load();
+      toast("File uploaded");
+    } catch (err) {
+      $("#upload-status").textContent = "";
+      toast(err.message, true);
+    }
+  });
+
+  $("#payload-list").addEventListener("click", async (e) => {
+    const id = e.target.dataset?.deletePayload;
+    if (!id) return;
+    const p = payloads.find((x) => x.id === id);
+    const warning = p && p.used_by && p.used_by.length
+      ? `\n\nIt is attached to: ${p.used_by.join(", ")}. Those scripts will run without it.`
+      : "";
+    if (!confirm(`Delete ${p ? p.filename : "this file"}?${warning}`)) return;
+    try {
+      await api(`/api/payloads/${id}`, { method: "DELETE" });
+      await load();
+      toast("File deleted");
     } catch (err) {
       toast(err.message, true);
     }

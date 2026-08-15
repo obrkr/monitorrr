@@ -324,7 +324,7 @@ func (a *Agent) drainJobs(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case job := <-a.jobs:
-			result := runJob(ctx, job)
+			result := runJob(ctx, job, a.downloadPayload)
 			a.log.Info("job finished", "job", job.ID, "exit", result.ExitCode, "ms", result.DurationMS)
 			a.reportResult(ctx, job.ID, result)
 		case <-time.After(250 * time.Millisecond):
@@ -341,7 +341,7 @@ func (a *Agent) jobWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case job := <-a.jobs:
-			result := runJob(ctx, job)
+			result := runJob(ctx, job, a.downloadPayload)
 			if result.Error != "" {
 				a.log.Warn("job failed", "job", job.ID, "error", result.Error, "ms", result.DurationMS)
 			} else {
