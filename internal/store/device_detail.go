@@ -10,7 +10,7 @@ import (
 )
 
 const deviceColumns = `id, hostname, os, arch, agent_version, local_ips, remote_ip, public_ip,
-	interval_override, status, enrolled_at, last_seen, retired_at, features, retire_checkins`
+	interval_override, status, enrolled_at, last_seen, retired_at, features, retire_checkins, tags`
 
 // GetDevice returns a single device.
 func (s *Store) GetDevice(ctx context.Context, id string) (Device, error) {
@@ -21,14 +21,14 @@ func (s *Store) GetDevice(ctx context.Context, id string) (Device, error) {
 
 	var (
 		d                  Device
-		ips, feat          string
+		ips, feat, tags    string
 		override, retired  sql.NullInt64
 		enrolled, lastSeen int64
 	)
 	err = s.db.QueryRowContext(ctx,
 		`SELECT `+deviceColumns+` FROM devices WHERE id = ?`, id,
 	).Scan(&d.ID, &d.Hostname, &d.OS, &d.Arch, &d.AgentVersion, &ips, &d.RemoteIP, &d.PublicIP,
-		&override, &d.Status, &enrolled, &lastSeen, &retired, &feat, &d.RetireCheckins)
+		&override, &d.Status, &enrolled, &lastSeen, &retired, &feat, &d.RetireCheckins, &tags)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}
@@ -42,6 +42,10 @@ func (s *Store) GetDevice(ctx context.Context, id string) (Device, error) {
 	d.Features = []string{}
 	if feat != "" {
 		d.Features = strings.Split(feat, ",")
+	}
+	d.Tags = []string{}
+	if tags != "" {
+		d.Tags = strings.Split(tags, ",")
 	}
 	d.Interval = def
 	if override.Valid && override.Int64 > 0 {

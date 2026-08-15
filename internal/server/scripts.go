@@ -266,3 +266,72 @@ func adminUser(r *http.Request) string {
 	}
 	return "anonymous (no admin auth)"
 }
+
+// --- tags and fleet dispatch ---
+
+func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Tags []string `json:"tags"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	tags, err := s.st.SetDeviceTags(r.Context(), r.PathValue("id"), body.Tags)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, proto.Error{Error: "no such device"})
+			return
+		}
+		s.fail(w, http.StatusInternalServerError, "could not set tags", err)
+		return
+	}
+	s.log.Info("device tags updated", "id", r.PathValue("id"), "tags", tags, "by", adminUser(r))
+	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
+}
+
+func (s *Server) handleListTags(w http.ResponseWriter, r *http.Request) {
+	tags, err := s.st.ListTags(r.Context())
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "could not list tags", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
+}
+
+// handleFleetDispatch runs one script across many devices. Unlike dispatching
+// to a single named device, incompatible machines are skipped and reported
+// rather than failing the request — but they are always reported, so a
+// fleet-wide run is never quietly narrower than it looks.
+func (s *Server) handleFleetDispatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ScriptID  string   `json:"script_id"`
+		DeviceIDs []string `json:"device_ids"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+
+	by := adminUser(r)
+	jobs, skipped, err := s.st.DispatchMany(r.Context(), body.ScriptID, body.DeviceIDs, by)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, proto.Error{Error: "no such script or device"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, proto.Error{Error: err.Error()})
+		return
+	}
+
+	for _, j := range jobs {
+		s.log.Info("job queued", "job", j.ID, "script", j.ScriptName, "sha256", j.ScriptSHA256,
+			"device", j.DeviceHostname, "by", by)
+	}
+	if len(skipped) > 0 {
+		s.log.Warn("fleet dispatch skipped devices", "count", len(skipped), "script", body.ScriptID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"queued":  len(jobs),
+		"skipped": skipped,
+	})
+}

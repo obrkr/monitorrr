@@ -153,6 +153,39 @@ td.empty, tr.empty td { color: var(--muted); text-align: center; padding: 34px; 
 .status.retired { color: var(--muted); }
 .stale { color: var(--warn); }
 
+/* ---- filtering and bulk actions ---- */
+
+.filter-bar { display: flex; align-items: center; gap: 12px; padding: 14px 18px 0; flex-wrap: wrap; }
+.filter-bar input[type="search"] {
+  flex: 1; min-width: 220px; padding: 7px 11px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 13.5px;
+}
+.tag-filters { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.tag-chip { font-size: 12px; padding: 4px 10px; border-radius: 20px; }
+.tag-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tag-chip.active .muted { color: rgba(255,255,255,0.75); }
+
+.tag {
+  display: inline-block; padding: 1px 8px; border-radius: 20px;
+  font-size: 11.5px; background: var(--panel-2); border: 1px solid var(--border);
+}
+
+.bulk-bar {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding: 12px 18px; margin-top: 14px;
+  background: var(--panel-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.bulk-bar select, .bulk-bar input[type="text"] {
+  padding: 6px 10px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 13px;
+}
+.bulk-bar input[type="text"] { width: 160px; }
+#bulk-count { font-size: 13px; font-weight: 560; }
+
+th.tick, td.tick { width: 34px; padding-right: 0; }
+td.go { cursor: pointer; }
+
 .crumb { margin-bottom: 14px; font-size: 13px; }
 .crumb a { color: var(--muted); text-decoration: none; }
 .crumb a:hover { color: var(--accent); }
@@ -165,6 +198,11 @@ td.empty, tr.empty td { color: var(--muted); text-align: center; padding: 34px; 
 }
 .run-row select:disabled { opacity: 0.5; }
 #device-actions { padding-top: 4px; }
+#device-tags {
+  padding: 6px 10px; min-width: 220px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 13px;
+}
 #device-status .status { font-size: 13px; }
 td a { color: inherit; }
 td a:hover { color: var(--accent); }

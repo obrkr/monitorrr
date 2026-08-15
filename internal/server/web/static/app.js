@@ -131,15 +131,27 @@ const devicesBody = $("#devices-body");
 
 if (devicesBody) {
   let intervalFocused = false;
+  let allDevices = [];
+  let selected = new Set();
+  let activeTag = "";
+  let search = "";
   const intervalInput = $("#interval-input");
   intervalInput.addEventListener("focus", () => (intervalFocused = true));
   intervalInput.addEventListener("blur", () => (intervalFocused = false));
 
   async function refresh() {
     try {
-      const [d, e] = await Promise.all([api("/api/devices"), api("/api/events?limit=25")]);
+      const [d, e, t, sc] = await Promise.all([
+        api("/api/devices"),
+        api("/api/events?limit=25"),
+        api("/api/tags"),
+        api("/api/scripts"),
+      ]);
+      allDevices = d.devices;
       renderStats(d);
-      renderDevices(d.devices, d.default_interval);
+      renderTagFilters(t.tags);
+      renderScriptChoices(sc.scripts);
+      renderDevices(d.default_interval);
       renderEvents(e.events);
       $("#refresh-note").textContent = "refreshing every 5s";
     } catch (err) {
@@ -154,35 +166,86 @@ if (devicesBody) {
     if (!intervalFocused) $("#interval-input").value = d.default_interval;
   }
 
-  function renderDevices(devices, defaultInterval) {
+  function renderTagFilters(tags) {
+    const el = $("#tag-filters");
+    if (!tags.length) {
+      el.innerHTML = '<span class="muted">no tags yet — select devices below to add some</span>';
+      return;
+    }
+    el.innerHTML =
+      `<button type="button" class="tag-chip ${activeTag === "" ? "active" : ""}" data-tag="">All</button>` +
+      tags
+        .map(
+          (t) => `<button type="button" class="tag-chip ${activeTag === t.tag ? "active" : ""}" data-tag="${esc(t.tag)}">${esc(t.tag)} <span class="muted">${t.count}</span></button>`
+        )
+        .join("");
+  }
+
+  function renderScriptChoices(scripts) {
+    const el = $("#bulk-script");
+    if (document.activeElement === el) return;
+    const previous = el.value;
+    el.innerHTML =
+      '<option value="">Select a script…</option>' +
+      scripts
+        .map((s) => `<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.interpreter)})</option>`)
+        .join("");
+    if (previous) el.value = previous;
+  }
+
+  // Filtering is client-side: the whole fleet arrives on every poll anyway, and
+  // at lab scale a round trip per keystroke would be worse, not better.
+  function visibleDevices() {
+    return allDevices.filter((d) => {
+      if (activeTag && !(d.tags || []).includes(activeTag)) return false;
+      if (!search) return true;
+      const hay = [d.hostname, d.public_ip, ...(d.local_ips || []), ...(d.tags || [])]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(search);
+    });
+  }
+
+  function renderDevices(defaultInterval) {
+    const devices = visibleDevices();
     if (!devices.length) {
-      devicesBody.innerHTML =
-        '<tr class="empty"><td colspan="7">No devices enrolled yet — see <a href="/deployment">Deployment</a> to install an agent.</td></tr>';
+      devicesBody.innerHTML = allDevices.length
+        ? '<tr class="empty"><td colspan="9">No devices match this filter.</td></tr>'
+        : '<tr class="empty"><td colspan="9">No devices enrolled yet — see <a href="/deployment">Deployment</a> to install an agent.</td></tr>';
+      updateBulkBar();
       return;
     }
 
     devicesBody.innerHTML = devices
       .map((dev) => {
         const interval = dev.interval_seconds || defaultInterval;
-        // Flag a device that is late but not yet past the offline grace period.
         const age = (Date.now() - new Date(dev.last_seen).getTime()) / 1000;
         const late = dev.status === "online" && !dev.retired_at && age > interval * 1.5;
         const ips = (dev.local_ips || []).join(", ") || "—";
+        const tags = (dev.tags || []).length
+          ? dev.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join(" ")
+          : '<span class="muted">—</span>';
 
-        return `<tr class="clickable" data-device-id="${esc(dev.id)}">
-          <td>${statusBadge(dev)}</td>
-          <td>
+        return `<tr data-device-id="${esc(dev.id)}">
+          <td class="tick"><input type="checkbox" data-select="${esc(dev.id)}" ${selected.has(dev.id) ? "checked" : ""}></td>
+          <td class="go">${statusBadge(dev)}</td>
+          <td class="go">
             <div class="hostname">${esc(dev.hostname)}</div>
             <div class="device-id">${esc(dev.id.slice(0, 12))}</div>
           </td>
-          <td><span class="os-badge os-${esc(dev.os)}">${esc(OS_LABEL[dev.os] || dev.os)}</span> <span class="muted">${esc(dev.arch)}</span></td>
-          <td class="muted">${esc(dev.agent_version || "—")}<br><span class="device-id">${interval}s</span></td>
-          <td>${esc(dev.public_ip || "—")}</td>
-          <td class="muted">${esc(ips)}</td>
-          <td class="${late ? "stale" : ""}">${relTime(dev.last_seen)}</td>
+          <td class="go">${tags}</td>
+          <td class="go"><span class="os-badge os-${esc(dev.os)}">${esc(OS_LABEL[dev.os] || dev.os)}</span> <span class="muted">${esc(dev.arch)}</span></td>
+          <td class="go muted">${esc(dev.agent_version || "—")}<br><span class="device-id">${interval}s</span></td>
+          <td class="go">${esc(dev.public_ip || "—")}</td>
+          <td class="go muted">${esc(ips)}</td>
+          <td class="go ${late ? "stale" : ""}">${relTime(dev.last_seen)}</td>
         </tr>`;
       })
       .join("");
+
+    const shown = devices.map((d) => d.id);
+    $("#select-all-devices").checked = shown.length > 0 && shown.every((id) => selected.has(id));
+    updateBulkBar();
   }
 
   function renderEvents(events) {
@@ -203,11 +266,94 @@ if (devicesBody) {
       .join("");
   }
 
-  // Actions live on the device page now; the dashboard is for looking, and a
-  // row is a link into the machine.
+  function updateBulkBar() {
+    const n = selected.size;
+    $("#bulk-bar").hidden = n === 0;
+    $("#bulk-count").textContent = `${n} selected`;
+    $("#bulk-run").disabled = n === 0 || !$("#bulk-script").value;
+  }
+
+  // A row opens the device; only the checkbox cell selects it.
   devicesBody.addEventListener("click", (e) => {
+    const box = e.target.closest("input[data-select]");
+    if (box) {
+      if (box.checked) selected.add(box.dataset.select);
+      else selected.delete(box.dataset.select);
+      updateBulkBar();
+      return;
+    }
+    if (!e.target.closest("td.go")) return;
     const row = e.target.closest("[data-device-id]");
     if (row) window.location.href = `/devices/${row.dataset.deviceId}`;
+  });
+
+  $("#select-all-devices").addEventListener("change", (e) => {
+    const shown = visibleDevices().map((d) => d.id);
+    if (e.target.checked) shown.forEach((id) => selected.add(id));
+    else shown.forEach((id) => selected.delete(id));
+    renderDevices(parseInt($("#interval-input").value, 10));
+  });
+
+  $("#tag-filters").addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-tag]");
+    if (!chip) return;
+    activeTag = chip.dataset.tag;
+    refresh();
+  });
+
+  $("#device-search").addEventListener("input", (e) => {
+    search = e.target.value.trim().toLowerCase();
+    renderDevices(parseInt($("#interval-input").value, 10));
+  });
+
+  $("#bulk-script").addEventListener("change", updateBulkBar);
+  $("#bulk-clear").addEventListener("click", () => {
+    selected.clear();
+    renderDevices(parseInt($("#interval-input").value, 10));
+  });
+
+  $("#bulk-run").addEventListener("click", async () => {
+    const scriptID = $("#bulk-script").value;
+    if (!scriptID || !selected.size) return;
+    const name = $("#bulk-script").options[$("#bulk-script").selectedIndex].text;
+    if (!confirm(`Run "${name}" on ${selected.size} device(s)?\n\nIt executes as root/SYSTEM on each one.`)) return;
+    try {
+      const res = await api("/api/dispatch", {
+        method: "POST",
+        body: JSON.stringify({ script_id: scriptID, device_ids: [...selected] }),
+      });
+      // Skipped devices are reported, never silently dropped: a fleet run that
+      // covered less than you asked for is exactly what you need to know.
+      if (res.skipped && res.skipped.length) {
+        toast(`Queued on ${res.queued}; skipped ${res.skipped.length} — ${res.skipped.map((s) => s.hostname + " (" + s.reason + ")").join("; ")}`, true);
+      } else {
+        toast(`Queued on ${res.queued} device(s) — see Runs`);
+      }
+      selected.clear();
+      refresh();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("#bulk-tag").addEventListener("click", async () => {
+    const tags = $("#bulk-tags").value.split(",").map((t) => t.trim()).filter(Boolean);
+    if (!selected.size) return;
+    if (!confirm(`Replace tags on ${selected.size} device(s) with: ${tags.join(", ") || "(none)"}?`)) return;
+    try {
+      for (const id of selected) {
+        await api(`/api/devices/${id}/tags`, {
+          method: "POST",
+          body: JSON.stringify({ tags }),
+        });
+      }
+      toast("Tags updated");
+      $("#bulk-tags").value = "";
+      selected.clear();
+      refresh();
+    } catch (err) {
+      toast(err.message, true);
+    }
   });
 
   $("#interval-form").addEventListener("submit", async (e) => {
@@ -236,6 +382,7 @@ const devicePanel = $("#device-panel");
 if (devicePanel) {
   const deviceID = devicePanel.dataset.deviceId;
   let scriptFocused = false;
+  let tagsFocused = false;
 
   async function loadDevice() {
     let d;
@@ -248,6 +395,8 @@ if (devicePanel) {
     }
 
     const dev = d.device;
+    // Re-rendering while the operator is typing tags would discard their input.
+    if (tagsFocused) return;
     document.title = `monitorrr · ${dev.hostname}`;
     $("#device-hostname").textContent = dev.hostname;
     $("#device-status").innerHTML = statusBadge(dev);
@@ -265,12 +414,33 @@ if (devicePanel) {
       <label>Check-in every</label><div class="field"><code>${dev.interval_seconds}s</code></div>
       <label>Last seen</label><div class="field"><code>${relTime(dev.last_seen)}</code> <span class="muted">${new Date(dev.last_seen).toLocaleString()}</span></div>
       <label>Enrolled</label><div class="field"><span class="muted">${new Date(dev.enrolled_at).toLocaleString()}</span></div>
-      <label>Device ID</label><div class="field"><code>${esc(dev.id)}</code></div>`;
+      <label>Device ID</label><div class="field"><code>${esc(dev.id)}</code></div>
+      <label>Tags</label>
+      <div class="field">
+        <input type="text" id="device-tags" value="${esc((dev.tags || []).join(", "))}" placeholder="site-a, laptop">
+        <button type="button" id="save-tags">Save</button>
+        <span class="muted">comma separated; used to target fleet-wide runs</span>
+      </div>`;
 
     $("#device-actions").innerHTML = `
       ${retired || retiring ? "" : '<button type="button" id="retire-device">Retire</button>'}
       <button type="button" id="delete-device" class="danger">Delete record</button>
       <span class="muted">Retire uninstalls the agent from this machine. Delete only removes the record — a running agent re-enrols.</span>`;
+
+    // Rebuilt on every poll, so the listener is attached to the new element.
+    const tagsInput = $("#device-tags");
+    tagsInput.addEventListener("focus", () => (tagsFocused = true));
+    tagsInput.addEventListener("blur", () => (tagsFocused = false));
+    $("#save-tags").addEventListener("click", async () => {
+      const tags = tagsInput.value.split(",").map((t) => t.trim()).filter(Boolean);
+      try {
+        await api(`/api/devices/${dev.id}/tags`, { method: "POST", body: JSON.stringify({ tags }) });
+        toast("Tags updated");
+        loadDevice();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
 
     const retireBtn = $("#retire-device");
     if (retireBtn) retireBtn.addEventListener("click", () => retireDevice(dev));

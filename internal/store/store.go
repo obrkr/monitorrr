@@ -47,7 +47,11 @@ CREATE TABLE IF NOT EXISTS devices (
   -- The address the device appears as on the internet, reported by the agent.
   -- Distinct from remote_ip, which is only the source address of the
   -- connection and is private whenever the agent shares our network.
-  public_ip        TEXT NOT NULL DEFAULT ''
+  public_ip        TEXT NOT NULL DEFAULT '',
+  -- Free-form labels for targeting, comma separated and normalised lowercase.
+  -- A text column rather than a join table: a home lab has tens of devices and
+  -- a handful of tags, and this keeps every query a single statement.
+  tags             TEXT NOT NULL DEFAULT ''
 );
 
 -- Append-only history. We deliberately do NOT write a row per heartbeat: only
@@ -155,6 +159,8 @@ type Device struct {
 	Features []string `json:"features"`
 	// RetireCheckins counts heartbeats received since retirement was requested.
 	RetireCheckins int `json:"retire_checkins"`
+	// Tags are operator-assigned labels used to target groups of devices.
+	Tags []string `json:"tags"`
 }
 
 // SupportsRetire reports whether this agent will act on a retire instruction.
@@ -221,6 +227,7 @@ func (s *Store) migrate() error {
 		{"devices", "features", "ALTER TABLE devices ADD COLUMN features TEXT NOT NULL DEFAULT ''"},
 		{"devices", "retire_checkins", "ALTER TABLE devices ADD COLUMN retire_checkins INTEGER NOT NULL DEFAULT 0"},
 		{"devices", "public_ip", "ALTER TABLE devices ADD COLUMN public_ip TEXT NOT NULL DEFAULT ''"},
+		{"devices", "tags", "ALTER TABLE devices ADD COLUMN tags TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, c := range columns {
 		var n int
@@ -585,7 +592,7 @@ func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, hostname, os, arch, agent_version, local_ips, remote_ip, public_ip,
 		        interval_override, status, enrolled_at, last_seen, retired_at,
-		        features, retire_checkins
+		        features, retire_checkins, tags
 		 FROM devices ORDER BY last_seen DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list devices: %w", err)
@@ -597,13 +604,13 @@ func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
 	for rows.Next() {
 		var (
 			d                  Device
-			ips, feat          string
+			ips, feat, tags    string
 			override, retired  sql.NullInt64
 			enrolled, lastSeen int64
 		)
 		if err := rows.Scan(&d.ID, &d.Hostname, &d.OS, &d.Arch, &d.AgentVersion, &ips,
 			&d.RemoteIP, &d.PublicIP, &override, &d.Status, &enrolled, &lastSeen, &retired,
-			&feat, &d.RetireCheckins); err != nil {
+			&feat, &d.RetireCheckins, &tags); err != nil {
 			return nil, fmt.Errorf("scan device: %w", err)
 		}
 		if retired.Valid {
@@ -614,6 +621,10 @@ func (s *Store) ListDevices(ctx context.Context) ([]Device, error) {
 		d.Features = []string{}
 		if feat != "" {
 			d.Features = strings.Split(feat, ",")
+		}
+		d.Tags = []string{}
+		if tags != "" {
+			d.Tags = strings.Split(tags, ",")
 		}
 		if ips != "" {
 			d.LocalIPs = strings.Split(ips, ",")
