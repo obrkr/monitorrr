@@ -327,8 +327,8 @@ needs to distinguish "will never act on this" from "has not got round to it".
   server warns about that at startup. Terminate TLS before this is reachable
   from anywhere untrusted.
 - **Remote execution is a serious trust boundary.** Scripts run as whatever the
-  agent runs as — root under systemd, SYSTEM under the Windows task. Anyone who
-  can reach the admin UI can execute arbitrary code on every enrolled machine,
-  so `-admin-password` stops being optional the moment this leaves an isolated
-  network. Every save and dispatch is logged with who, what (name + SHA-256),
-  and where.
+  agent runs as — root under systemd, SYSTEM under the Windows task. Any admin
+  account can therefore execute arbitrary code on every enrolled machine, which
+  is what the read-only role is for: someone who only needs to look should not
+  hold that power. Every save and dispatch is logged with who, what (name +
+  SHA-256), and where.
