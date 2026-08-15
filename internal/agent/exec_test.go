@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -247,5 +248,48 @@ func TestRunJobReportsDownloadFailure(t *testing.T) {
 	res := runJob(context.Background(), j, fetch)
 	if !strings.Contains(res.Error, "404") {
 		t.Errorf("Error = %q, want the download failure surfaced", res.Error)
+	}
+}
+
+// Windows PowerShell reads a .ps1 file as ANSI unless it opens with a
+// byte-order mark, which silently corrupts every non-ASCII character in it.
+// This is testable anywhere: writeScript decides on the interpreter, not the
+// host.
+func TestPowerShellScriptsAreWrittenWithABOM(t *testing.T) {
+	const body = "Write-Output \"em dash — here\"\n"
+
+	ps := job(body, 30)
+	ps.Interpreter = "powershell"
+	path, cleanup, err := writeScript(ps)
+	if err != nil {
+		t.Fatalf("write powershell script: %v", err)
+	}
+	defer cleanup()
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !bytes.HasPrefix(got, utf8BOM) {
+		t.Errorf("powershell script does not start with a UTF-8 BOM: % x", got[:min(3, len(got))])
+	}
+	if string(bytes.TrimPrefix(got, utf8BOM)) != body {
+		t.Error("the script body was altered beyond the byte-order mark")
+	}
+
+	// A shell script must not get one: /bin/sh would try to execute the mark
+	// as part of the first line, and a shebang has to be the first two bytes.
+	sh, cleanupSh, err := writeScript(job(body, 30))
+	if err != nil {
+		t.Fatalf("write shell script: %v", err)
+	}
+	defer cleanupSh()
+
+	got, err = os.ReadFile(sh)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if bytes.HasPrefix(got, utf8BOM) {
+		t.Error("shell script was written with a UTF-8 BOM")
 	}
 }

@@ -83,9 +83,9 @@ func New(cfg Config, st *store.Store, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
-	shTmpl, err := texttemplate.ParseFS(webFS, "web/install.sh.tmpl")
+	shTmpl, err := texttemplate.ParseFS(webFS, "web/install.sh.tmpl", "web/install.ps1.tmpl")
 	if err != nil {
-		return nil, fmt.Errorf("parse installer template: %w", err)
+		return nil, fmt.Errorf("parse installer templates: %w", err)
 	}
 	s := &Server{cfg: cfg, st: st, tmpl: tmpl, shTmpl: shTmpl, log: log,
 		lanAddr: detectLANAddr(), builds: newBuildCache()}
@@ -130,6 +130,7 @@ func (s *Server) routes() http.Handler {
 	// token but no business holding the admin password, and anyone with the
 	// token can enroll anyway, so the trust level is the same.
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
+	mux.HandleFunc("GET /install.ps1", s.handleInstallScript)
 	mux.HandleFunc("GET /download/{name}", s.handleDownload)
 
 	// Static assets are public so the login prompt renders cleanly.
@@ -638,9 +639,14 @@ func (s *Server) availableBuilds() []build {
 	return builds
 }
 
-// handleInstallScript renders a shell installer that detects the calling
-// machine's OS and architecture. Picking the build by hand is the single
-// easiest thing to get wrong when a lab mixes amd64 and arm64.
+// handleInstallScript renders an installer that detects the calling machine's
+// OS and architecture. Picking the build by hand is the single easiest thing to
+// get wrong when a lab mixes amd64 and arm64 — and on Windows, where there is
+// no equivalent of "curl | sh", copying steps out of a page by hand is how an
+// agent ends up living in whatever directory the terminal happened to be in.
+//
+// Which script is served keys on the request path: .sh for Linux and macOS,
+// .ps1 for Windows.
 func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	if !s.validEnrollToken(r) {
 		writeJSON(w, http.StatusUnauthorized, proto.Error{Error: "valid ?token= required"})
@@ -652,12 +658,20 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
-	if err := s.shTmpl.ExecuteTemplate(w, "install.sh.tmpl", map[string]any{
+	name, contentType := "install.sh.tmpl", "text/x-shellscript; charset=utf-8"
+	if strings.HasSuffix(r.URL.Path, ".ps1") {
+		// text/plain, not a PowerShell media type: iex reads the body either
+		// way, and a type Windows might treat as executable content is one more
+		// thing that could prompt.
+		name, contentType = "install.ps1.tmpl", "text/plain; charset=utf-8"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	if err := s.shTmpl.ExecuteTemplate(w, name, map[string]any{
 		"ServerURL":   s.publicURL(r),
 		"EnrollToken": token,
 	}); err != nil {
-		s.log.Error("installer render failed", "error", err)
+		s.log.Error("installer render failed", "error", err, "template", name)
 	}
 }
 

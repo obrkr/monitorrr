@@ -66,9 +66,17 @@ Then, on a Linux or macOS target:
 curl -fsSL "http://your-server:8080/install.sh?token=<token>" | sudo sh
 ```
 
-The installer detects the machine's OS and CPU architecture, fetches the matching build, installs to `/usr/local/bin`, and registers a systemd service or launchd daemon. The token is on the Deployment page, which also carries per-OS manual instructions and a Windows scheduled-task setup.
+Or, in an elevated PowerShell on Windows:
+
+```powershell
+irm "http://your-server:8080/install.ps1?token=<token>" | iex
+```
+
+Each installer detects the machine's CPU architecture, fetches the matching build, installs to a fixed location — `/usr/local/bin` or `C:\Program Files\monitorrr` — and registers a systemd service, a launchd daemon or a scheduled task. The token is on the Deployment page, which also carries the manual steps for every platform.
 
 Architecture detection is the point rather than a nicety: a Linux VM on an Apple Silicon host is arm64, and running an amd64 build there fails with `cannot execute binary file`.
+
+The **install location** is not cosmetic either. An agent only replaces itself during an auto-update, and only deletes its own binary on retirement, when it is running from that fixed path with a service registered. Running the binary straight out of a download directory is treated as someone trying it by hand, and is deliberately left alone — which is exactly why there is an installer rather than a list of commands to paste.
 
 ---
 

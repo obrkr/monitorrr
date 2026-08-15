@@ -84,7 +84,7 @@
 <section class="panel">
   <div class="panel-head">
     <h2>Install</h2>
-    <span class="muted">run in the foreground first to confirm check-in, then install as a service</span>
+    <span class="muted">one line per platform — the manual steps below it show what that line does</span>
   </div>
 
   <div class="tabs" role="tablist">
@@ -195,14 +195,34 @@ sudo launchctl load -w /Library/LaunchDaemons/io.monitorrr.agent.plist</code></p
   </div>
 
   <div class="tab-panel" data-panel="windows">
-    <h3>1. Download and run</h3>
+    <h3>Recommended &mdash; one line</h3>
+<pre><code>irm "{{.ServerURL}}/install.ps1?token={{.EnrollToken}}" | iex</code></pre>
+    <p class="muted">
+      Run it in an <strong>elevated PowerShell</strong>. It detects whether the
+      machine is amd64 or arm64, downloads the matching build, installs it to
+      <code>C:\Program Files\monitorrr</code>, and registers a scheduled task
+      that runs it as SYSTEM at boot. It also clears any retirement marker, so a
+      machine that was previously retired enrols again without further steps.
+      Installing over a running agent stops the task first, because Windows will
+      not overwrite a running executable.
+    </p>
+    <p class="muted">
+      Passing flags needs the script block form, since a piped script takes no
+      arguments:<br>
+      <code>&amp; ([scriptblock]::Create((irm "{{.ServerURL}}/install.ps1?token={{.EnrollToken}}"))) -NoService</code><br>
+      <code>-NoService</code> skips the scheduled task; <code>-Prefix DIR</code>
+      installs elsewhere.
+    </p>
+
+    <h3>Manual &mdash; 1. download and run</h3>
 <pre><code>$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
-Invoke-WebRequest -Uri "{{.ServerURL}}/download/monitorrr-agent-windows-$arch.exe?token={{.EnrollToken}}" -OutFile "monitorrr-agent.exe"
+Invoke-WebRequest -UseBasicParsing -Uri "{{.ServerURL}}/download/monitorrr-agent-windows-$arch.exe?token={{.EnrollToken}}" -OutFile "monitorrr-agent.exe"
 .\monitorrr-agent.exe -server {{.ServerURL}} -enroll-token {{.EnrollToken}} -force-enroll</code></pre>
     <p class="muted">
-      The <code>$arch</code> line matters on Windows-on-ARM VMs. SmartScreen may
-      warn on an unsigned binary. Run PowerShell as Administrator so the agent
-      can write its identity to <code>C:\ProgramData\monitorrr</code>.
+      This runs the agent <em>from wherever your shell currently is</em> and
+      installs nothing. It is for a quick look: the device appears on the
+      dashboard until you close the window. The <code>$arch</code> line matters
+      on Windows-on-ARM VMs. SmartScreen may warn on an unsigned binary.
     </p>
     <p class="muted">
       <code>-force-enroll</code> is there so a machine that was retired earlier
@@ -212,21 +232,41 @@ Invoke-WebRequest -Uri "{{.ServerURL}}/download/monitorrr-agent-windows-$arch.ex
       failed.
     </p>
 
-    <h3>2. Install as a scheduled task at boot</h3>
+    <h3>Manual &mdash; 2. install as a scheduled task at boot</h3>
 <pre><code>New-Item -ItemType Directory -Force -Path "C:\Program Files\monitorrr" | Out-Null
 Copy-Item .\monitorrr-agent.exe "C:\Program Files\monitorrr\monitorrr-agent.exe" -Force
 Remove-Item .\monitorrr-agent.exe   # the installed copy is the one that matters now
 
 $action  = New-ScheduledTaskAction -Execute "C:\Program Files\monitorrr\monitorrr-agent.exe" `
              -Argument '-server {{.ServerURL}} -enroll-token {{.EnrollToken}}'
-$trigger = New-ScheduledTaskTrigger -AtStartup
+$triggers = @(
+  (New-ScheduledTaskTrigger -AtStartup),
+  (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1))
+)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+$settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+  -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
+  -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 
-Register-ScheduledTask -TaskName "monitorrr-agent" -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName "monitorrr-agent" -Action $action -Trigger $triggers `
   -Principal $principal -Settings $settings -Force
 Start-ScheduledTask -TaskName "monitorrr-agent"</code></pre>
-    <p class="muted">A scheduled task avoids pulling in a Windows service wrapper dependency. Swap it for a real service later if you want <code>sc.exe</code> control.</p>
+    <p class="muted">
+      The install location is not cosmetic: the agent only replaces itself
+      during an auto-update, and only removes its binary on retirement, when it
+      is running from
+      <code>C:\Program Files\monitorrr\monitorrr-agent.exe</code> with the task
+      registered. An agent run from a Downloads folder is treated as someone
+      trying a build by hand, and is left alone.
+    </p>
+    <p class="muted">
+      The second trigger and the zero execution-time limit are both load-bearing.
+      A scheduled task restarts on <em>failure</em> only, but the agent exits
+      cleanly on purpose after replacing its own binary — so without the
+      one-minute repetition an agent that auto-updates never comes back until the
+      machine reboots. And the default three-day execution limit would have Task
+      Scheduler stop a perfectly healthy agent every 72 hours.
+    </p>
   </div>
 </section>
 

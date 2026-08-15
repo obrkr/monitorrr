@@ -130,11 +130,22 @@ func runJob(ctx context.Context, job proto.Job, fetch fetchPayload) proto.JobRes
 	return finish()
 }
 
+// utf8BOM is written ahead of every PowerShell script. Windows PowerShell 5.1
+// decodes a .ps1 file with the system ANSI code page unless it starts with a
+// byte-order mark, so a UTF-8 script containing anything outside ASCII arrives
+// mangled: an em dash becomes three CP1252 characters, the last of which is a
+// closing quote, and the script fails to parse for reasons nothing in it
+// explains. PowerShell 7 reads UTF-8 either way and tolerates the mark.
+//
+// The mark is added on the way to disk only. Job checksums are computed over
+// the script body the server sent, so this cannot affect verification.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 // writeScript materialises the script in a private temp file.
 func writeScript(job proto.Job) (path string, cleanup func(), err error) {
-	ext := ".sh"
+	ext, prefix := ".sh", []byte(nil)
 	if job.Interpreter == "powershell" {
-		ext = ".ps1"
+		ext, prefix = ".ps1", utf8BOM
 	}
 
 	f, err := os.CreateTemp("", "monitorrr-job-*"+ext)
@@ -143,6 +154,11 @@ func writeScript(job proto.Job) (path string, cleanup func(), err error) {
 	}
 	cleanup = func() { os.Remove(f.Name()) }
 
+	if _, err := f.Write(prefix); err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("write temp script: %w", err)
+	}
 	if _, err := f.WriteString(job.Script); err != nil {
 		f.Close()
 		cleanup()
