@@ -4,7 +4,7 @@
 ![Built with Claude Code](https://img.shields.io/badge/built%20with-Claude%20Code-8a5cf6?style=for-the-badge)
 ![Two Static Binaries](https://img.shields.io/badge/deploy-two%20static%20binaries-3b82f6?style=for-the-badge)
 
-A self-hosted **endpoint visibility and remote execution** tool for a home lab — a very small take on the Nexthink idea. Agents check in on a schedule, a dashboard shows who is reporting, and from a device's page you can run a script on it, push an installer and execute it, or pull a file back off it. One Go codebase builds static agents for Windows, macOS and Linux on amd64 and arm64; the server is a single binary with a SQLite file beside it.
+A self-hosted **endpoint visibility and remote execution** tool for a home lab. Agents check in on a schedule, a dashboard shows who is reporting, and from a device's page you can run a script on it, push an installer and execute it, or pull a file back off it. One Go codebase builds static agents for Windows, macOS and Linux on amd64 and arm64; the server is a single binary with a SQLite file beside it.
 
 > **This project is fully vibe coded.** The protocol, the agent lifecycle, the self-update mechanism and the permission model were all built through conversational, AI-assisted development rather than a planned build. It has been verified with real agents on real machines — a 40 MB file collected byte-identical, an agent updating itself under a live supervisor, a retirement that genuinely uninstalls — but it executes arbitrary code as root and SYSTEM on every machine it touches. Read it yourself before pointing it at anything you care about.
 
