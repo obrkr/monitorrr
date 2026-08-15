@@ -10,6 +10,10 @@ A self-hosted **endpoint visibility and remote execution** tool for a home lab. 
 
 > **Built with Go and SQLite.** One external dependency: a pure-Go SQLite driver, so `CGO_ENABLED=0` produces a static binary for every target from one machine with no C toolchain. The UI is server-rendered templates and one vanilla JavaScript file, embedded in the binary with `go:embed`. No build step, no bundler, no framework and no CDN — a console that fails to load is a console you cannot use during an incident.
 
+![The dashboard](docs/screenshots/dashboard.png)
+
+*The dashboard: who is reporting, from where, and what has changed. Filter by tag, select machines, and run a script across all of them.*
+
 ---
 
 ## Contents
@@ -89,6 +93,10 @@ agent                                 server
 
 **Two different addresses, for two different questions.** The **public IP** is what the machine looks like from the internet, resolved by the agent itself against an external service and cached for 30 minutes. **Seen from** is the source address of its connection, which the server observes directly and which is private whenever the agent shares your network. The server cannot derive the first from the second, which is why the agent reports it.
 
+![A device page](docs/screenshots/device.png)
+
+*Everything about one machine on one page: what it is, what it can do, and every action that targets it.*
+
 ---
 
 ## Accounts and roles
@@ -108,11 +116,19 @@ Passwords are PBKDF2-HMAC-SHA256 at 600,000 iterations with a per-user salt, fro
 
 Settings also carries two destructive actions, each requiring a different word to be typed: **reset the fleet**, which clears devices, scripts, runs and stored files but keeps accounts; and **factory reset**, which additionally removes every account, the audit log and all settings, returning the instance to first run.
 
+![Settings](docs/screenshots/settings.png)
+
+*Accounts, appearance and the three ways to take an instance apart.*
+
 ---
 
 ## Running scripts
 
 Scripts are written under **Scripts** and dispatched from a device's page, or across a tag from the dashboard. A job is `queued` when dispatched, `running` when an agent collects it on a check-in, and `done` when the result is posted back. A sweeper marks it `lost` if the agent never reports.
+
+![The script library](docs/screenshots/scripts.png)
+
+*Scripts are managed in one place and run from elsewhere. The starter library imports twelve read-only diagnostics as `sh` and PowerShell pairs.*
 
 Details that matter in practice:
 
@@ -122,6 +138,10 @@ Details that matter in practice:
 - A non-zero exit is a normal result, not an execution failure. `error` is reserved for "could not run it at all" — timeout, missing interpreter, checksum mismatch.
 - Each job snapshots the script body and hash, so editing or deleting a script never rewrites what the audit trail says already ran.
 - Output is capped at 64 KB per stream, at the agent and again at the store.
+
+![Run history](docs/screenshots/runs.png)
+
+*A run keeps the exact script that was dispatched alongside its output, so a result is still readable after the script it came from has been edited.*
 
 Dispatching to a **named device** is strict: an incompatible one is an error. Dispatching to a **group** skips incompatible machines and reports them, because skipping a Windows box for a shell script is expected across a mixed fleet — but a fleet run must never be quietly narrower than it looked.
 
@@ -189,6 +209,10 @@ Updates are withheld while a device has work outstanding, since updating means e
 ## Audit trail
 
 Every state-changing request is recorded: who, what, when, from where, and detail enough to know what happened. Sign-ins and failed sign-ins are recorded too — a trail showing only successful access misses the part worth reviewing.
+
+![The audit log](docs/screenshots/audit.png)
+
+*Visible to administrators only, and filterable by action, target or account.*
 
 It is middleware, not a call in each handler, for the same reason the read-only rule is: anything that changes state is a POST, PATCH or DELETE, so covering those covers everything by construction. Reads are not recorded, and neither are refused requests — recording those would make the log describe things that never happened.
 
