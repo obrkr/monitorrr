@@ -156,6 +156,13 @@ Deleting a device and retiring it are different operations, so the console names
 | Next check-in | 401 → re-enrols as a new device | receives retire, tears down, exits |
 | Use it for | resetting a device's identity | decommissioning a machine |
 
+The agent's binary is removed too, wherever it was installed. The decision keys
+on whether a service manager knows about the agent rather than on the path
+alone, because the installer accepts `--prefix` and an agent in `/opt/monitorrr`
+is every bit as real as one in `/usr/local/bin`. With no service registered
+nothing is deleted — that is someone running a build by hand, and removing it
+under them would be a surprise for no benefit.
+
 Teardown runs in a **detached helper process**, not inline. Stopping your own service from inside it is a race you cannot win: systemd would kill the agent partway through its own cleanup, and Windows refuses to delete a running executable.
 
 Retirement leaves a marker beside the identity file, and an agent that finds one exits instead of enrolling. That is what stops a supervisor restart quietly resurrecting a decommissioned machine as a ghost device — the failure this protects against is real, and was found by testing rather than reasoning. Coming back is therefore deliberate: reinstall (the installer clears the marker), run once with `-force-enroll`, or delete the marker by hand. The machine returns as a **new device**; the retired record is history, not something to reuse.

@@ -94,17 +94,28 @@ func (a *Agent) writeTombstone() {
 
 // planUninstall works out which paths belong to a real installation.
 //
-// Both flags are deliberately conservative. The state *file* is always ours to
-// delete, but its directory is only ours when it is the canonical per-OS
-// location: running with -state ./dist/agent-state.json must never lead to
-// ./dist being removed, and that directory holds the server binary.
-func planUninstall(exePath, statePath string) uninstallPlan {
+// The binary is removed when this is a *managed* installation — one a service
+// manager knows about — wherever it happens to live, or when it sits at the
+// canonical install path. Keying on the service rather than the path alone
+// matters because the installer accepts --prefix: an agent installed to
+// /opt/monitorrr is every bit as real as one in /usr/local/bin, and leaving its
+// binary behind after retirement is exactly the litter this is meant to avoid.
+//
+// With no service registered, nothing is removed. That is someone running the
+// binary by hand — very possibly a build they are in the middle of testing —
+// and deleting it under them would be a nasty surprise for no benefit.
+//
+// The state *file* is always ours to delete, but its directory is only ours
+// when it is the canonical per-OS location: running with
+// -state ./dist/agent-state.json must never lead to ./dist being removed, and
+// that directory holds the server binary.
+func planUninstall(exePath, statePath string, managed bool) uninstallPlan {
 	p := uninstallPlan{ExePath: exePath, StatePath: statePath}
 	if statePath != "" {
 		p.StateDir = filepath.Dir(statePath)
 		p.RemoveStateDir = p.StateDir == filepath.Dir(DefaultStatePath())
 	}
-	p.RemoveBinary = exePath != "" && exePath == canonicalInstallPath()
+	p.RemoveBinary = exePath != "" && (managed || exePath == canonicalInstallPath())
 	return p
 }
 
@@ -134,10 +145,11 @@ func (a *Agent) retire(ctx context.Context) {
 		}
 	}
 
-	plan := planUninstall(exe, a.cfg.StatePath)
+	managed := serviceInstalled()
+	plan := planUninstall(exe, a.cfg.StatePath, managed)
 	if exe != "" && !plan.RemoveBinary {
-		a.log.Warn("not removing the binary: it is not at the standard install path",
-			"path", exe, "expected", canonicalInstallPath())
+		a.log.Warn("not removing the binary: no service is registered for it, so this looks like a manual run",
+			"path", exe)
 	}
 	if plan.StateDir != "" && !plan.RemoveStateDir {
 		a.log.Info("removing the state file but leaving its directory: not a standard state location",

@@ -10,6 +10,14 @@ import (
 	"syscall"
 )
 
+// serviceInstalled reports whether the scheduled task exists, which is what
+// distinguishes a real installation from someone running the binary by hand.
+func serviceInstalled() bool {
+	cmd := exec.Command("schtasks", "/query", "/tn", "monitorrr-agent")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return cmd.Run() == nil
+}
+
 // spawnUninstaller starts a detached cmd that tears down the installation.
 //
 // The scheduled task is deleted first so nothing restarts the agent once it

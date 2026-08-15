@@ -19,6 +19,7 @@ func TestPlanUninstallProtectsNonStandardStateDirs(t *testing.T) {
 		name           string
 		exe            string
 		state          string
+		managed        bool
 		wantBinary     bool
 		wantStateDir   bool
 		wantStateDirIs string
@@ -27,14 +28,18 @@ func TestPlanUninstallProtectsNonStandardStateDirs(t *testing.T) {
 			name:           "canonical install",
 			exe:            canonicalInstallPath(),
 			state:          canonicalState,
+			managed:        true,
 			wantBinary:     true,
 			wantStateDir:   true,
 			wantStateDirIs: canonicalDir,
 		},
 		{
+			// No service registered: someone is running a build by hand, and
+			// deleting it under them would be a nasty surprise.
 			name:           "developer build in a working directory",
 			exe:            "/Users/someone/projects/monitorrr/dist/monitorrr-agent",
 			state:          "/Users/someone/projects/monitorrr/dist/agent-state.json",
+			managed:        false,
 			wantBinary:     false,
 			wantStateDir:   false,
 			wantStateDirIs: "/Users/someone/projects/monitorrr/dist",
@@ -43,21 +48,35 @@ func TestPlanUninstallProtectsNonStandardStateDirs(t *testing.T) {
 			name:         "canonical binary but a custom state path",
 			exe:          canonicalInstallPath(),
 			state:        "/etc/monitorrr-agent.json",
+			managed:      true,
 			wantBinary:   true,
 			wantStateDir: false,
 		},
 		{
-			name:         "unknown binary location, canonical state",
+			// Installed with --prefix. Every bit as real an installation as one
+			// in /usr/local/bin, so its binary must go too.
+			name:         "managed install somewhere else",
 			exe:          "/opt/monitorrr/monitorrr-agent",
 			state:        canonicalState,
-			wantBinary:   false,
+			managed:      true,
+			wantBinary:   true,
+			wantStateDir: true,
+		},
+		{
+			// The canonical path is trusted even with no service found, since
+			// nothing else puts a binary there.
+			name:         "canonical path with no service registered",
+			exe:          canonicalInstallPath(),
+			state:        canonicalState,
+			managed:      false,
+			wantBinary:   true,
 			wantStateDir: true,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan := planUninstall(tc.exe, tc.state)
+			plan := planUninstall(tc.exe, tc.state, tc.managed)
 			if plan.RemoveBinary != tc.wantBinary {
 				t.Errorf("RemoveBinary = %v, want %v (exe %s)", plan.RemoveBinary, tc.wantBinary, tc.exe)
 			}
@@ -136,7 +155,7 @@ func TestTombstoneWithNoStatePath(t *testing.T) {
 // An agent that cannot identify its own binary must still tear down what it can
 // rather than removing something arbitrary.
 func TestPlanUninstallWithUnknownPaths(t *testing.T) {
-	plan := planUninstall("", "")
+	plan := planUninstall("", "", true)
 	if plan.RemoveBinary {
 		t.Error("RemoveBinary = true with no executable path")
 	}

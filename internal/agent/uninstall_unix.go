@@ -12,10 +12,25 @@ import (
 	"syscall"
 )
 
-const (
+// Where the installer registers the agent. Variables rather than constants for
+// the same reason installPath is: a deployment that puts them elsewhere can set
+// them at build time, and tests can exercise teardown without a real service.
+var (
 	systemdUnit  = "/etc/systemd/system/monitorrr-agent.service"
 	launchdPlist = "/Library/LaunchDaemons/io.monitorrr.agent.plist"
 )
+
+// serviceInstalled reports whether a service manager knows about this agent,
+// which is what distinguishes a real installation from someone running the
+// binary by hand.
+func serviceInstalled() bool {
+	path := systemdUnit
+	if runtime.GOOS == "darwin" {
+		path = launchdPlist
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // spawnUninstaller starts a detached shell that tears down the installation.
 //

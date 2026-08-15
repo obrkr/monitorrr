@@ -125,6 +125,8 @@ sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}} -fo
 
     <h3>Manual — 2. install as a systemd service</h3>
 <pre><code>sudo install -m 0755 monitorrr-agent /usr/local/bin/monitorrr-agent
+rm -f monitorrr-agent   # the installed copy is the one that matters now
+
 sudo tee /etc/systemd/system/monitorrr-agent.service &gt;/dev/null &lt;&lt;'EOF'
 [Unit]
 Description=monitorrr agent
@@ -170,6 +172,8 @@ sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}} -fo
 
     <h3>Manual — 2. install as a launchd daemon</h3>
 <pre><code>sudo install -m 0755 monitorrr-agent /usr/local/bin/monitorrr-agent
+rm -f monitorrr-agent   # the installed copy is the one that matters now
+
 sudo tee /Library/LaunchDaemons/io.monitorrr.agent.plist &gt;/dev/null &lt;&lt;'EOF'
 &lt;?xml version="1.0" encoding="UTF-8"?&gt;
 &lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
@@ -211,6 +215,7 @@ Invoke-WebRequest -Uri "{{.ServerURL}}/download/monitorrr-agent-windows-$arch.ex
     <h3>2. Install as a scheduled task at boot</h3>
 <pre><code>New-Item -ItemType Directory -Force -Path "C:\Program Files\monitorrr" | Out-Null
 Copy-Item .\monitorrr-agent.exe "C:\Program Files\monitorrr\monitorrr-agent.exe" -Force
+Remove-Item .\monitorrr-agent.exe   # the installed copy is the one that matters now
 
 $action  = New-ScheduledTaskAction -Execute "C:\Program Files\monitorrr\monitorrr-agent.exe" `
              -Argument '-server {{.ServerURL}} -enroll-token {{.EnrollToken}}'
