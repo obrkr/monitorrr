@@ -99,26 +99,28 @@
     <p class="muted">
       Detects whether the machine is amd64 or arm64, downloads the matching
       build, installs to <code>/usr/local/bin</code>, and registers a systemd
-      service. Add <code>--no-service</code> to skip the service, or
-      <code>--prefix DIR</code> to install elsewhere. Pipe to
-      <code>sh -s -- --no-service</code> to pass flags through the pipe.
+      service. It also clears any retirement marker, so a machine that was
+      previously retired enrols again without further steps. Add
+      <code>--no-service</code> to skip the service, or <code>--prefix DIR</code>
+      to install elsewhere. Pipe to <code>sh -s -- --no-service</code> to pass
+      flags through the pipe.
     </p>
 
     <h3>Manual — 1. download and run</h3>
 <pre><code>arch=$(uname -m); case $arch in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
 curl -fsSL -o monitorrr-agent "{{.ServerURL}}/download/monitorrr-agent-linux-$arch?token={{.EnrollToken}}"
 chmod +x monitorrr-agent
-sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
+sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}} -force-enroll</code></pre>
     <p class="muted">
       The <code>uname -m</code> line matters: an Ubuntu VM on an Apple Silicon
       host is arm64, and running an amd64 binary there fails with
       <code>cannot execute binary file</code>.
     </p>
     <p class="muted">
-      Bringing back a machine that was retired: the one-line installer clears its
-      retirement marker for you, but these manual steps do not. Add
-      <code>-force-enroll</code> to the command above the first time, or delete
-      <code>/var/lib/monitorrr/retired</code>.
+      <code>-force-enroll</code> is there so a machine that was retired earlier
+      enrols again rather than exiting. It is on the one-off command only, not
+      the service below: an agent that always forced enrolment would resurrect
+      itself as a new device if it were ever retired and the uninstall failed.
     </p>
 
     <h3>Manual — 2. install as a systemd service</h3>
@@ -147,7 +149,8 @@ systemctl status monitorrr-agent</code></pre>
 <pre><code>curl -fsSL "{{.ServerURL}}/install.sh?token={{.EnrollToken}}" | sudo sh</code></pre>
     <p class="muted">
       Same installer as Linux: it picks Apple Silicon or Intel automatically,
-      clears the Gatekeeper quarantine flag, and registers a launchd daemon.
+      clears the Gatekeeper quarantine flag, registers a launchd daemon, and
+      clears any retirement marker so a previously retired machine comes back.
     </p>
 
     <h3>Manual — 1. download and run</h3>
@@ -156,13 +159,13 @@ systemctl status monitorrr-agent</code></pre>
 curl -fsSL -o monitorrr-agent "{{.ServerURL}}/download/monitorrr-agent-darwin-$arch?token={{.EnrollToken}}"
 chmod +x monitorrr-agent
 xattr -d com.apple.quarantine monitorrr-agent 2&gt;/dev/null || true
-sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
+sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}} -force-enroll</code></pre>
     <p class="muted">The <code>xattr</code> line clears Gatekeeper's quarantine flag on an unsigned binary fetched over the network.</p>
     <p class="muted">
-      Bringing back a machine that was retired: the one-line installer clears its
-      retirement marker for you, but these manual steps do not. Add
-      <code>-force-enroll</code> to the command above the first time, or delete
-      <code>/Library/Application Support/monitorrr/retired</code>.
+      <code>-force-enroll</code> is there so a machine that was retired earlier
+      enrols again rather than exiting. It is on the one-off command only, not
+      the daemon below: an agent that always forced enrolment would resurrect
+      itself as a new device if it were ever retired and the uninstall failed.
     </p>
 
     <h3>Manual — 2. install as a launchd daemon</h3>
@@ -191,20 +194,18 @@ sudo launchctl load -w /Library/LaunchDaemons/io.monitorrr.agent.plist</code></p
     <h3>1. Download and run</h3>
 <pre><code>$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
 Invoke-WebRequest -Uri "{{.ServerURL}}/download/monitorrr-agent-windows-$arch.exe?token={{.EnrollToken}}" -OutFile "monitorrr-agent.exe"
-
-# If this machine was retired before, clear the marker that stops it enrolling.
-Remove-Item "C:\ProgramData\monitorrr\retired" -ErrorAction SilentlyContinue
-
-.\monitorrr-agent.exe -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
+.\monitorrr-agent.exe -server {{.ServerURL}} -enroll-token {{.EnrollToken}} -force-enroll</code></pre>
     <p class="muted">
       The <code>$arch</code> line matters on Windows-on-ARM VMs. SmartScreen may
       warn on an unsigned binary. Run PowerShell as Administrator so the agent
       can write its identity to <code>C:\ProgramData\monitorrr</code>.
     </p>
     <p class="muted">
-      A machine that was retired leaves a marker behind so a restarted service
-      cannot quietly re-enrol it. Removing that file — or passing
-      <code>-force-enroll</code> once — is what brings it back deliberately.
+      <code>-force-enroll</code> is there so a machine that was retired earlier
+      enrols again rather than exiting. It is on the one-off command only, not
+      the scheduled task below: an agent that always forced enrolment would
+      resurrect itself as a new device if it were ever retired and the uninstall
+      failed.
     </p>
 
     <h3>2. Install as a scheduled task at boot</h3>
