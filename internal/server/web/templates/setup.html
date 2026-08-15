@@ -1,0 +1,39 @@
+{{define "setup.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>monitorrr · Set up</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%2334d399'/></svg>">
+</head>
+<body class="centred">
+<main class="card">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <span class="brand-name">monitorrr</span>
+  </div>
+  <h1>Create the administrator account</h1>
+  <p class="muted">
+    Nobody can reach this server until an account exists. This first one is an
+    administrator; further accounts are added under Settings.
+  </p>
+  <form id="setup-form">
+    <label for="username">Username</label>
+    <input type="text" id="username" autocomplete="username" autofocus required>
+
+    <label for="password">Password</label>
+    <input type="password" id="password" autocomplete="new-password" required minlength="8">
+
+    <label for="confirm">Confirm password</label>
+    <input type="password" id="confirm" autocomplete="new-password" required minlength="8">
+
+    <p class="muted">At least 8 characters.</p>
+    <button type="submit" class="primary wide">Create account</button>
+  </form>
+  <p class="form-error" id="error" hidden></p>
+</main>
+<script src="/static/auth.js"></script>
+</body>
+</html>
+{{end}}

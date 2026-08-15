@@ -52,13 +52,12 @@ const offlineGrace = 3
 
 // Config holds server runtime options.
 type Config struct {
-	Addr          string // listen address, e.g. ":8080"
-	DBPath        string // path to the SQLite file
-	DistDir       string // directory holding built agent binaries
-	AdminPassword string // if set, the UI and admin API require basic auth
-	PublicURL     string // base URL agents should call; inferred from request when empty
-	TLSCert       string
-	TLSKey        string
+	Addr      string // listen address, e.g. ":8080"
+	DBPath    string // path to the SQLite file
+	DistDir   string // directory holding built agent binaries
+	PublicURL string // base URL agents should call; inferred from request when empty
+	TLSCert   string
+	TLSKey    string
 }
 
 // Server wires the store, templates, and HTTP routes together.
@@ -140,6 +139,13 @@ func (s *Server) routes() http.Handler {
 	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 
+	// Authentication pages are reachable without a session, for obvious reasons.
+	mux.HandleFunc("GET /setup", s.handleSetupPage)
+	mux.HandleFunc("POST /setup", s.handleSetup)
+	mux.HandleFunc("GET /login", s.handleLoginPage)
+	mux.HandleFunc("POST /login", s.handleLogin)
+	mux.HandleFunc("GET /logout", s.handleLogout)
+
 	// Admin surface.
 	admin := http.NewServeMux()
 	admin.HandleFunc("GET /{$}", s.handleDashboard)
@@ -149,6 +155,13 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("GET /scripts", s.handleScriptsPage)
 	admin.HandleFunc("GET /runs", s.handleRunsPage)
 	admin.HandleFunc("GET /deployment", s.handleDeployment)
+	admin.HandleFunc("GET /settings", s.handleSettingsPage)
+	admin.HandleFunc("GET /api/users", s.handleListUsers)
+	admin.HandleFunc("POST /api/users", s.handleCreateUser)
+	admin.HandleFunc("PATCH /api/users/{id}", s.handleUpdateUser)
+	admin.HandleFunc("DELETE /api/users/{id}", s.handleDeleteUser)
+	admin.HandleFunc("POST /api/admin/retire-all", s.handleRetireAll)
+	admin.HandleFunc("POST /api/admin/reset", s.handleReset)
 	admin.HandleFunc("GET /api/devices", s.handleListDevices)
 	admin.HandleFunc("GET /api/events", s.handleListEvents)
 	admin.HandleFunc("DELETE /api/devices/{id}", s.handleDeleteDevice)
@@ -174,7 +187,7 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("POST /api/scripts/{id}/payload", s.handleAttachPayload)
 	admin.HandleFunc("GET /api/jobs", s.handleListJobs)
 	admin.HandleFunc("GET /api/jobs/{id}", s.handleGetJob)
-	mux.Handle("/", s.requireAdmin(admin))
+	mux.Handle("/", s.requireAuth(admin))
 
 	return s.withLogging(mux)
 }
@@ -525,6 +538,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "dashboard.html", map[string]any{
 		"Page":    "dashboard",
 		"Version": Version,
+		"User":    userFrom(r),
 	})
 }
 
@@ -547,6 +561,7 @@ func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "deployment.html", map[string]any{
 		"Page":        "deployment",
 		"Version":     Version,
+		"User":        userFrom(r),
 		"AutoUpdate":  autoUpdate,
 		"ServerURL":   s.publicURL(r),
 		"EnrollToken": token,
@@ -760,25 +775,6 @@ func detectLANAddr() string {
 }
 
 // --- middleware and helpers ---
-
-// requireAdmin gates the admin surface behind basic auth when a password is
-// configured. With no password set the UI is open, which is fine on an isolated
-// lab network and warned about loudly at startup.
-func (s *Server) requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.AdminPassword == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		_, pass, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(s.cfg.AdminPassword)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="monitorrr", charset="UTF-8"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
 
 func (s *Server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

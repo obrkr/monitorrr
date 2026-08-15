@@ -32,7 +32,6 @@ func run() error {
 	flag.StringVar(&cfg.Addr, "addr", env("MONITORRR_ADDR", ":8080"), "listen address")
 	flag.StringVar(&cfg.DBPath, "db", env("MONITORRR_DB", "monitorrr.db"), "path to the SQLite database file")
 	flag.StringVar(&cfg.DistDir, "dist", env("MONITORRR_DIST", "dist"), "directory containing built agent binaries")
-	flag.StringVar(&cfg.AdminPassword, "admin-password", os.Getenv("MONITORRR_ADMIN_PASSWORD"), "password for the web UI and admin API (any username); empty disables auth")
 	flag.StringVar(&cfg.PublicURL, "public-url", os.Getenv("MONITORRR_PUBLIC_URL"), "base URL agents should call; inferred from the request when empty")
 	flag.StringVar(&cfg.TLSCert, "tls-cert", os.Getenv("MONITORRR_TLS_CERT"), "TLS certificate file (enables HTTPS)")
 	flag.StringVar(&cfg.TLSKey, "tls-key", os.Getenv("MONITORRR_TLS_KEY"), "TLS key file")
@@ -79,8 +78,8 @@ func run() error {
 
 	log.Info("monitorrr starting", "version", server.FullVersion(), "db", abs, "dist", cfg.DistDir)
 	log.Info("enrollment token", "token", token, "hint", "shown on the Deployment page")
-	if cfg.AdminPassword == "" {
-		log.Warn("admin authentication is disabled — set -admin-password before exposing this beyond a trusted network")
+	if configured, err := st.HasUsers(ctx); err == nil && !configured {
+		log.Info("no accounts yet — open the web UI to create the first administrator")
 	}
 	if cfg.TLSCert == "" {
 		log.Warn("serving plain HTTP — agent tokens cross the network in clear text; terminate TLS at a proxy or pass -tls-cert/-tls-key")

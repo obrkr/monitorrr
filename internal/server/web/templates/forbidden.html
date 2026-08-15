@@ -1,0 +1,12 @@
+{{define "forbidden.html"}}
+{{template "head" .}}
+<section class="panel">
+  <div class="panel-head"><h2>Not permitted</h2></div>
+  <div class="empty-state">
+    <p>{{.Message}}</p>
+    <p class="muted">You are signed in as <code>{{.User.Username}}</code> ({{.User.Role}}).</p>
+    <p><a class="btn" href="/">Back to the dashboard</a></p>
+  </div>
+</section>
+{{template "foot" .}}
+{{end}}

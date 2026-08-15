@@ -254,25 +254,27 @@ func (s *Server) handleDevicePage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "device.html", map[string]any{
 		"Page":     "devices",
 		"Version":  Version,
+		"User":     userFrom(r),
 		"DeviceID": r.PathValue("id"),
 	})
 }
 
 func (s *Server) handleScriptsPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "scripts.html", map[string]any{"Page": "scripts", "Version": Version})
+	s.render(w, "scripts.html", map[string]any{
+		"Page": "scripts", "Version": Version, "User": userFrom(r)})
 }
 
 func (s *Server) handleRunsPage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "runs.html", map[string]any{"Page": "runs", "Version": Version})
+	s.render(w, "runs.html", map[string]any{
+		"Page": "runs", "Version": Version, "User": userFrom(r)})
 }
 
-// adminUser names whoever performed an action, for the audit trail. With auth
-// disabled there is no identity to record, which is itself worth recording.
+// adminUser names whoever performed an action, for the audit trail.
 func adminUser(r *http.Request) string {
-	if user, _, ok := r.BasicAuth(); ok && user != "" {
-		return user
+	if u := userFrom(r); u.Username != "" {
+		return u.Username
 	}
-	return "anonymous (no admin auth)"
+	return "unknown"
 }
 
 // --- tags and fleet dispatch ---

@@ -955,6 +955,152 @@ if (jobsBody) {
   setInterval(refreshJobs, 5000);
 }
 
+// ---- settings ----
+
+const usersBody = $("#users");
+
+if (usersBody) {
+  let you = "";
+
+  async function loadUsers() {
+    try {
+      const d = await api("/api/users");
+      you = d.you;
+      usersBody.innerHTML = d.users
+        .map(
+          (u) => `<tr>
+            <td><strong>${esc(u.username)}</strong>${u.id === you ? ' <span class="muted">(you)</span>' : ""}</td>
+            <td>
+              <select data-role-for="${esc(u.id)}" ${u.id === you ? "disabled" : ""}>
+                <option value="admin" ${u.role === "admin" ? "selected" : ""}>admin</option>
+                <option value="readonly" ${u.role === "readonly" ? "selected" : ""}>read-only</option>
+              </select>
+            </td>
+            <td class="muted">${new Date(u.created_at).toLocaleDateString()}</td>
+            <td class="muted">${u.last_login ? relTime(u.last_login) : "never"}</td>
+            <td class="row-actions">
+              <button class="link" data-password-for="${esc(u.id)}" data-name="${esc(u.username)}">Set password</button>
+              ${u.id === you ? "" : `<button class="link danger-link" data-delete-user="${esc(u.id)}" data-name="${esc(u.username)}">Delete</button>`}
+            </td>
+          </tr>`
+        )
+        .join("");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  usersBody.addEventListener("change", async (e) => {
+    const id = e.target.dataset?.roleFor;
+    if (!id) return;
+    try {
+      await api(`/api/users/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role: e.target.value }),
+      });
+      toast("Role updated");
+      loadUsers();
+    } catch (err) {
+      toast(err.message, true);
+      loadUsers();
+    }
+  });
+
+  usersBody.addEventListener("click", async (e) => {
+    const del = e.target.dataset?.deleteUser;
+    if (del) {
+      if (!confirm(`Delete the account "${e.target.dataset.name}"?\n\nAny active session it has ends immediately.`)) return;
+      try {
+        await api(`/api/users/${del}`, { method: "DELETE" });
+        toast("Account deleted");
+        loadUsers();
+      } catch (err) {
+        toast(err.message, true);
+      }
+      return;
+    }
+
+    const pw = e.target.dataset?.passwordFor;
+    if (pw) {
+      const password = prompt(`New password for "${e.target.dataset.name}" (at least 8 characters):`);
+      if (!password) return;
+      try {
+        await api(`/api/users/${pw}`, {
+          method: "PATCH",
+          body: JSON.stringify({ password }),
+        });
+        // Changing a password ends that account's other sessions, so say so.
+        toast("Password changed — their other sessions were ended");
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+  });
+
+  $("#new-user").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("/api/users", {
+        method: "POST",
+        body: JSON.stringify({
+          username: $("#new-username").value,
+          password: $("#new-password").value,
+          role: $("#new-role").value,
+        }),
+      });
+      $("#new-username").value = "";
+      $("#new-password").value = "";
+      toast("Account created");
+      loadUsers();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  // Both of these are irreversible, so they ask for the word to be typed
+  // rather than accepting a click.
+  async function confirmDestructive(title, detail, path) {
+    if (!confirm(`${title}\n\n${detail}`)) return null;
+    const typed = prompt(`Type RESET to confirm:`);
+    if (typed !== "RESET") {
+      if (typed !== null) toast("Not confirmed — nothing was changed");
+      return null;
+    }
+    return api(path, { method: "POST", body: JSON.stringify({ confirm: typed }) });
+  }
+
+  $("#retire-all").addEventListener("click", async () => {
+    try {
+      const res = await confirmDestructive(
+        "Retire every agent?",
+        "Each machine will uninstall its agent on its next check-in and stop reporting.",
+        "/api/admin/retire-all"
+      );
+      if (res) toast(`${res.retiring} device(s) retiring`);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("#reset-instance").addEventListener("click", async () => {
+    try {
+      const res = await confirmDestructive(
+        "Reset this instance?",
+        "Every device, script, run and stored file is deleted and the enrollment token is rotated. Accounts are kept. Agents are NOT uninstalled.",
+        "/api/admin/reset"
+      );
+      if (res) {
+        const r = res.removed;
+        toast(`Reset: ${r.devices} devices, ${r.scripts} scripts, ${r.jobs} runs removed`);
+      }
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  loadUsers();
+}
+
 // ---- deployment ----
 
 document.querySelectorAll("[data-copy]").forEach((btn) => {

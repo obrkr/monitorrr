@@ -1,0 +1,78 @@
+{{define "settings.html"}}
+{{template "head" .}}
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Accounts</h2>
+    <span class="muted">admins change things; read-only accounts can look but not touch</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Username</th><th>Role</th><th>Created</th><th>Last sign-in</th><th></th></tr>
+      </thead>
+      <tbody id="users"><tr class="empty"><td colspan="5">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>Add an account</h2></div>
+  <form id="new-user" class="editor">
+    <div class="editor-row split-row">
+      <div>
+        <label for="new-username">Username</label>
+        <input type="text" id="new-username" autocomplete="off" required>
+      </div>
+      <div>
+        <label for="new-role">Role</label>
+        <select id="new-role">
+          <option value="readonly">Read-only — can view everything, change nothing</option>
+          <option value="admin">Admin — full control</option>
+        </select>
+      </div>
+    </div>
+    <div class="editor-row">
+      <label for="new-password">Password</label>
+      <input type="password" id="new-password" autocomplete="new-password" required minlength="8">
+    </div>
+    <div class="editor-actions">
+      <button type="submit" class="primary">Create account</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel danger-zone">
+  <div class="panel-head">
+    <h2>Decommissioning</h2>
+    <span class="muted">both are irreversible</span>
+  </div>
+
+  <div class="danger-item">
+    <div>
+      <strong>Retire every agent</strong>
+      <p class="muted">
+        Each machine uninstalls its own agent — service, identity file and
+        binary — and stops reporting. Records are kept so you can watch it
+        happen. Machines that are powered off retire when they next come back.
+      </p>
+    </div>
+    <button type="button" id="retire-all" class="danger">Retire all agents</button>
+  </div>
+
+  <div class="danger-item">
+    <div>
+      <strong>Reset this instance</strong>
+      <p class="muted">
+        Deletes every device, script, run, uploaded file and collected file, and
+        rotates the enrollment token so old agents cannot rejoin. Accounts are
+        kept — you would otherwise be locked out. Agents are <em>not</em>
+        uninstalled: retire them first if that is what you want.
+      </p>
+    </div>
+    <button type="button" id="reset-instance" class="danger">Reset instance</button>
+  </div>
+</section>
+
+{{template "foot" .}}
+{{end}}

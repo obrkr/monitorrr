@@ -70,6 +70,72 @@ body {
 
 .version { color: var(--muted); font-family: var(--mono); font-size: 12px; }
 
+.whoami { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.whoami .user { font-weight: 560; }
+.role-badge {
+  font-size: 11px; padding: 1px 7px; border-radius: 20px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+}
+.signout { color: var(--muted); text-decoration: none; font-size: 13px; }
+.signout:hover { color: var(--accent); }
+
+/* ---- auth pages ---- */
+
+body.centred {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; padding: 24px;
+}
+.card {
+  width: 100%; max-width: 400px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 28px;
+}
+.card .brand { margin-bottom: 22px; }
+.card h1 { font-size: 19px; margin: 0 0 8px; }
+.card p.muted { margin: 0 0 20px; }
+.card label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 5px; }
+.card input {
+  width: 100%; padding: 9px 11px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px; font: inherit; font-size: 14px;
+}
+.card input:focus { outline: none; border-color: var(--accent); }
+button.wide { width: 100%; padding: 10px; margin-top: 20px; font-size: 14px; }
+.form-error {
+  margin: 16px 0 0; padding: 10px 12px; font-size: 13px;
+  color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent);
+  border: 1px solid var(--bad); border-radius: 7px;
+}
+
+/* ---- settings ---- */
+
+.danger-zone { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.danger-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 18px; border-bottom: 1px solid var(--border);
+}
+.danger-item:last-child { border-bottom: none; }
+.danger-item strong { font-size: 14px; }
+.danger-item p { margin: 6px 0 0; max-width: 62ch; }
+.danger-item button { flex: none; }
+#users select { padding: 4px 8px; font-size: 12.5px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+#users select:disabled { opacity: 0.6; }
+
+/* A read-only account cannot act, so the controls that would act are hidden
+   rather than left to fail against the server. */
+body.readonly .interval-form,
+body.readonly .bulk-bar,
+body.readonly #new-script,
+body.readonly #import-starters,
+body.readonly .upload-row,
+body.readonly .editor-actions,
+body.readonly #device-actions,
+body.readonly .run-row,
+body.readonly .picker-toolbar,
+body.readonly [data-delete],
+body.readonly [data-retire],
+body.readonly .row-actions button { display: none; }
+
 main { max-width: 1120px; margin: 0 auto; padding: 24px; }
 
 /* ---- stat tiles ---- */

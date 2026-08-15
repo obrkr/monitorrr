@@ -230,6 +230,52 @@ on the device page; the scripts page is purely for writing and storing scripts.
 The UI is server-rendered Go templates plus vanilla JS — no Node, no build step.
 Everything is embedded in the binary with `go:embed`.
 
+## Accounts and roles
+
+On first launch the server has no accounts and serves nothing but a setup page,
+where the first administrator is created. Further accounts are added under
+Settings, in one of two roles:
+
+| | Admin | Read-only |
+|---|---|---|
+| View devices, runs, scripts, collected files | yes | yes |
+| Run scripts, collect files, retire devices | yes | no |
+| Manage scripts, files, tags, settings | yes | no |
+| Manage accounts | yes | not even visible |
+
+The role rule is one line in the middleware: **read-only accounts may issue GET
+and HEAD, nothing else.** Every mutation in this server is a POST, PATCH or
+DELETE, so there is no list of protected endpoints to keep in step with the
+routes — a new mutating endpoint is restricted the moment it is added, rather
+than the moment someone remembers to add it to a list. Account management is
+additionally hidden outright, since a read-only operator has no business
+enumerating accounts.
+
+Passwords are PBKDF2-HMAC-SHA256 at the OWASP-recommended 600,000 iterations,
+per-user salt. Failed logins are indistinguishable whether the account exists or
+not, including in how long they take, so the login page cannot be used to
+enumerate accounts. Sessions are random tokens stored only as hashes; changing a
+password or deleting an account ends that account's sessions immediately.
+
+The last administrator cannot be deleted or demoted — an instance with no
+administrator cannot be recovered through the UI at all.
+
+Agents are unaffected: they authenticate with their own per-device tokens, so
+adding operator accounts does not disturb the fleet.
+
+## Decommissioning
+
+Two irreversible actions live under Settings, both requiring `RESET` to be typed
+rather than a button clicked:
+
+- **Retire every agent** — each machine uninstalls its own agent and stops
+  reporting. Records are kept so you can watch it happen.
+- **Reset this instance** — deletes every device, script, run, uploaded file and
+  collected file, and rotates the enrollment token so old agents cannot rejoin.
+  Accounts are kept, because wiping them would lock you out of the server you
+  just reset. Agents are *not* uninstalled: retire them first if that is what
+  you want.
+
 ## Configuration
 
 Server flags (each also reads an env var):
@@ -239,7 +285,6 @@ Server flags (each also reads an env var):
 | `-addr` | `MONITORRR_ADDR` | `:8080` | Listen address |
 | `-db` | `MONITORRR_DB` | `monitorrr.db` | SQLite file |
 | `-dist` | `MONITORRR_DIST` | `dist` | Where agent binaries are served from |
-| `-admin-password` | `MONITORRR_ADMIN_PASSWORD` | *(none)* | Basic auth for UI and admin API |
 | `-public-url` | `MONITORRR_PUBLIC_URL` | *(inferred)* | Base URL shown in install commands |
 | `-tls-cert` / `-tls-key` | `MONITORRR_TLS_*` | *(none)* | Enable HTTPS directly |
 
@@ -277,10 +322,10 @@ needs to distinguish "will never act on this" from "has not got round to it".
   the token but no business holding admin credentials, and anyone with the token
   can enroll anyway, so the trust level is unchanged.
 - The identity file is written `0600` via a temp file and rename.
-- **Defaults are lab defaults.** With no `-admin-password` the UI is open, and
-  without TLS the agent tokens cross the network in clear text. The server warns
-  about both at startup. Set a password and terminate TLS before this is
-  reachable from anywhere untrusted.
+- **The UI requires an account**, created on first launch. Without TLS, however,
+  both session cookies and agent tokens cross the network in clear text, and the
+  server warns about that at startup. Terminate TLS before this is reachable
+  from anywhere untrusted.
 - **Remote execution is a serious trust boundary.** Scripts run as whatever the
   agent runs as — root under systemd, SYSTEM under the Windows task. Anyone who
   can reach the admin UI can execute arbitrary code on every enrolled machine,
