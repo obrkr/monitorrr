@@ -114,6 +114,12 @@ sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</co
       host is arm64, and running an amd64 binary there fails with
       <code>cannot execute binary file</code>.
     </p>
+    <p class="muted">
+      Bringing back a machine that was retired: the one-line installer clears its
+      retirement marker for you, but these manual steps do not. Add
+      <code>-force-enroll</code> to the command above the first time, or delete
+      <code>/var/lib/monitorrr/retired</code>.
+    </p>
 
     <h3>Manual — 2. install as a systemd service</h3>
 <pre><code>sudo install -m 0755 monitorrr-agent /usr/local/bin/monitorrr-agent
@@ -152,6 +158,12 @@ chmod +x monitorrr-agent
 xattr -d com.apple.quarantine monitorrr-agent 2&gt;/dev/null || true
 sudo ./monitorrr-agent -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
     <p class="muted">The <code>xattr</code> line clears Gatekeeper's quarantine flag on an unsigned binary fetched over the network.</p>
+    <p class="muted">
+      Bringing back a machine that was retired: the one-line installer clears its
+      retirement marker for you, but these manual steps do not. Add
+      <code>-force-enroll</code> to the command above the first time, or delete
+      <code>/Library/Application Support/monitorrr/retired</code>.
+    </p>
 
     <h3>Manual — 2. install as a launchd daemon</h3>
 <pre><code>sudo install -m 0755 monitorrr-agent /usr/local/bin/monitorrr-agent
@@ -179,11 +191,20 @@ sudo launchctl load -w /Library/LaunchDaemons/io.monitorrr.agent.plist</code></p
     <h3>1. Download and run</h3>
 <pre><code>$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
 Invoke-WebRequest -Uri "{{.ServerURL}}/download/monitorrr-agent-windows-$arch.exe?token={{.EnrollToken}}" -OutFile "monitorrr-agent.exe"
+
+# If this machine was retired before, clear the marker that stops it enrolling.
+Remove-Item "C:\ProgramData\monitorrr\retired" -ErrorAction SilentlyContinue
+
 .\monitorrr-agent.exe -server {{.ServerURL}} -enroll-token {{.EnrollToken}}</code></pre>
     <p class="muted">
       The <code>$arch</code> line matters on Windows-on-ARM VMs. SmartScreen may
       warn on an unsigned binary. Run PowerShell as Administrator so the agent
       can write its identity to <code>C:\ProgramData\monitorrr</code>.
+    </p>
+    <p class="muted">
+      A machine that was retired leaves a marker behind so a restarted service
+      cannot quietly re-enrol it. Removing that file — or passing
+      <code>-force-enroll</code> once — is what brings it back deliberately.
     </p>
 
     <h3>2. Install as a scheduled task at boot</h3>

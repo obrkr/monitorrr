@@ -147,3 +147,34 @@ func TestPlanUninstallWithUnknownPaths(t *testing.T) {
 		t.Errorf("StateDir = %q, want empty", plan.StateDir)
 	}
 }
+
+// A retired machine must be able to come back — deliberately. The marker stops
+// a supervisor restart re-enrolling it by accident, but an operator who asks
+// for it explicitly has to have a way through, or retirement is a one-way door
+// on any install the one-line installer did not perform.
+func TestForceEnrollClearsTheMarker(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "agent.json")
+
+	a := &Agent{
+		cfg: Config{StatePath: statePath},
+		log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	a.writeTombstone()
+	if !a.isTombstoned() {
+		t.Fatal("marker was not written")
+	}
+
+	if err := a.clearTombstone(); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if a.isTombstoned() {
+		t.Error("machine still looks retired after the marker was cleared")
+	}
+
+	// Clearing again is not an error: the flag may be left in a service
+	// definition, and every subsequent start would otherwise fail.
+	if err := a.clearTombstone(); err != nil {
+		t.Errorf("clearing an absent marker returned %v, want nil", err)
+	}
+}

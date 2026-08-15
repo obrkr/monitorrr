@@ -125,6 +125,20 @@ path (`/usr/local/bin/monitorrr-agent`, or `C:\Program Files\monitorrr\`).
 Someone testing a build from a working directory should not have it deleted out
 from under them.
 
+**Bringing a retired machine back.** Retirement leaves a marker file beside the
+identity file, and an agent that finds one exits instead of enrolling — that is
+what stops a supervisor restart quietly resurrecting a decommissioned machine as
+a new device. Coming back is therefore deliberate, by one of:
+
+- reinstalling with the one-line installer, which clears the marker for you
+- running the agent once with `-force-enroll`, which clears it and enrols
+- deleting the marker by hand (`/var/lib/monitorrr/retired`,
+  `/Library/Application Support/monitorrr/retired`, or
+  `C:\ProgramData\monitorrr\retired`)
+
+The machine comes back as a **new device** with a new identity; the retired
+record is kept as history rather than reused.
+
 ### Agent auto-update
 
 Agents replace their own binary when the server is serving a different build for

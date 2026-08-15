@@ -57,6 +57,21 @@ func (a *Agent) isTombstoned() bool {
 	return err == nil
 }
 
+// clearTombstone removes the retirement marker, allowing this machine to enrol
+// again. Reinstalling does this too; the flag exists for the cases where the
+// installer is not what put the agent there.
+func (a *Agent) clearTombstone() error {
+	path := tombstonePath(a.cfg.StatePath)
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	a.log.Info("retirement marker cleared", "path", path)
+	return nil
+}
+
 // writeTombstone marks this machine as retired before teardown begins.
 func (a *Agent) writeTombstone() {
 	path := tombstonePath(a.cfg.StatePath)

@@ -460,7 +460,9 @@ if (devicePanel) {
     $("#device-actions").innerHTML = `
       ${retired || retiring ? "" : '<button type="button" id="retire-device">Retire</button>'}
       <button type="button" id="delete-device" class="danger">Delete record</button>
-      <span class="muted">Retire uninstalls the agent from this machine. Delete only removes the record — a running agent re-enrols.</span>`;
+      <span class="muted">${retired
+        ? "This machine was retired. To bring it back, reinstall the agent (the installer clears its retirement marker) or run it once with -force-enroll."
+        : "Retire uninstalls the agent from this machine. Delete only removes the record — a running agent re-enrols."}</span>`;
 
     // Rebuilt on every poll, so the listener is attached to the new element.
     const tagsInput = $("#device-tags");

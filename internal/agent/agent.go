@@ -53,6 +53,7 @@ type Config struct {
 	Once         bool   // single check-in, then exit — useful for testing
 	NoPublicIP   bool   // do not resolve the public address via a third party
 	NoAutoUpdate bool   // never replace our own binary
+	ForceEnroll  bool   // enrol even if this machine was previously retired
 }
 
 // state is the durable identity persisted between runs.
@@ -144,10 +145,20 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Checked before anything else: a retired machine must not come back as a
 	// new device just because a supervisor restarted the process.
 	if a.isTombstoned() {
-		a.log.Warn("this machine was retired; not enrolling",
-			"marker", tombstonePath(a.cfg.StatePath),
-			"hint", "delete the marker or reinstall the agent to enrol again")
-		return nil
+		if !a.cfg.ForceEnroll {
+			a.log.Warn("this machine was retired; not enrolling",
+				"marker", tombstonePath(a.cfg.StatePath),
+				"hint", "reinstall the agent, or pass -force-enroll, to bring this machine back")
+			return nil
+		}
+		// An explicit instruction to come back is exactly what the marker is
+		// waiting for. Clearing it here means the operator does not have to know
+		// where it lives, which on Windows is somewhere they would have to be
+		// told about.
+		if err := a.clearTombstone(); err != nil {
+			return fmt.Errorf("could not clear the retirement marker: %w", err)
+		}
+		a.log.Warn("this machine was retired; enrolling anyway because -force-enroll was given")
 	}
 
 	// Resolve the public address up front, off the check-in path, so it is
