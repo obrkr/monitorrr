@@ -34,10 +34,7 @@ func (a *Agent) ownBinarySHA256() string {
 	}
 
 	digest := ""
-	if exe, err := os.Executable(); err == nil {
-		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-			exe = resolved
-		}
+	if exe, err := ownExecutable(); err == nil {
 		if d, err := hashFile(exe); err == nil {
 			digest = d
 		} else {
@@ -55,12 +52,9 @@ func (a *Agent) ownBinarySHA256() string {
 // selfUpdate replaces this agent's binary and exits so the supervisor restarts
 // it. Every failure leaves the existing installation untouched.
 func (a *Agent) selfUpdate(ctx context.Context, update *proto.AgentUpdate) error {
-	exe, err := os.Executable()
+	exe, err := ownExecutable()
 	if err != nil {
 		return fmt.Errorf("cannot determine own path: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
 	}
 
 	// Same rule as retirement: only a real installation is modified. Replacing

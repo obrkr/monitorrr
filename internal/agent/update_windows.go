@@ -34,7 +34,7 @@ func swapBinary(staged, target string) error {
 // cleanupOldBinary removes the previous version left behind by an update. Safe
 // to call at any time: it does nothing if there is nothing to remove.
 func cleanupOldBinary() {
-	if exe, err := os.Executable(); err == nil {
+	if exe, err := ownExecutable(); err == nil {
 		os.Remove(exe + ".old")
 	}
 }

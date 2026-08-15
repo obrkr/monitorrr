@@ -55,8 +55,14 @@ func spawnUninstaller(log *slog.Logger, plan uninstallPlan) error {
 		script []string
 	)
 
+	logPath := plan.UninstallLog()
+
 	// Let the agent exit before its files go away.
 	script = append(script, "sleep 2")
+	if logPath != "" {
+		script = append(script,
+			"echo \"$(date -u +%Y-%m-%dT%H:%M:%SZ) monitorrr uninstall starting\" >> "+shellQuote(logPath)+" 2>/dev/null || true")
+	}
 
 	if plan.StatePath != "" {
 		script = append(script, fmt.Sprintf("rm -f %q", plan.StatePath))
@@ -70,9 +76,11 @@ func spawnUninstaller(log *slog.Logger, plan uninstallPlan) error {
 		script = append(script, fmt.Sprintf("rmdir %q 2>/dev/null || true", plan.StateDir))
 		steps = append(steps, "remove "+plan.StateDir+" (if empty; the retirement marker is kept)")
 	}
-	if plan.RemoveBinary {
-		script = append(script, fmt.Sprintf("rm -f %q", plan.ExePath))
-		steps = append(steps, "remove "+plan.ExePath)
+	// Removing the binary is the part that must not fail quietly, so each
+	// candidate is retried and the outcome recorded.
+	for _, binary := range plan.BinaryPaths() {
+		script = append(script, removeAndVerify(binary, logPath))
+		steps = append(steps, "remove "+binary)
 	}
 
 	// Service teardown last, because it is the step that can kill this helper.
@@ -100,43 +108,86 @@ func spawnUninstaller(log *slog.Logger, plan uninstallPlan) error {
 	}
 
 	logUninstallPlan(log, steps)
+	joined := strings.Join(script, "; ")
 
-	cmd := uninstallCommand(log, strings.Join(script, "; "))
+	// Try the transient unit first, and check that it actually started. It
+	// returns as soon as the unit is queued, so waiting costs nothing — and
+	// not waiting would mean a failure here (a leftover unit of the same name
+	// is enough) silently skipped the entire teardown with no fallback.
+	if runner := systemdRunCommand(joined); runner != nil {
+		out, err := runner.CombinedOutput()
+		if err == nil {
+			log.Info("teardown running in a transient systemd unit",
+				"reason", "a helper in our own cgroup is killed when the service stops")
+			return nil
+		}
+		log.Warn("could not start the teardown as a transient unit, falling back to a detached shell",
+			"error", err, "output", strings.TrimSpace(string(out)))
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", joined)
+	// Setsid detaches from our process group, which is what launchd kills.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start uninstaller: %w", err)
 	}
-	// A plain shell deliberately outlives us and is left alone. systemd-run is
-	// different: it returns as soon as the transient unit is queued, so reaping
-	// it leaves no zombie behind.
-	if filepathBase(cmd.Path) == "systemd-run" {
-		go cmd.Wait()
-	}
+	// Do not Wait: the shell deliberately outlives us.
 	return nil
 }
 
-// uninstallCommand builds the process that runs the teardown.
+// removeAndVerify deletes a path, retries once if it is still there, and
+// records the outcome.
 //
-// systemd-run puts it in a transient unit with its own cgroup, so stopping the
-// agent's service cannot kill it. Where that is unavailable — no systemd, or
-// not running as root — a setsid shell is used instead, and the step ordering
-// above is what keeps that case correct.
-func uninstallCommand(log *slog.Logger, script string) *exec.Cmd {
-	if runtime.GOOS != "darwin" && os.Geteuid() == 0 {
-		if path, err := exec.LookPath("systemd-run"); err == nil {
-			log.Info("running teardown in a transient systemd unit",
-				"reason", "a helper inside our own cgroup is killed when the service stops")
-			return exec.Command(path,
-				"--collect",
-				"--unit=monitorrr-uninstall",
-				"--description=monitorrr agent uninstall",
-				"/bin/sh", "-c", script)
-		}
+// A plain "rm -f" reports success whether or not the file existed and whether
+// or not it went, which is precisely the failure mode that let a retired agent
+// keep its binary.
+//
+// Built by concatenation rather than a nested format string: an earlier version
+// passed one format string through two Sprintf rounds, and date's own %-escapes
+// came out mangled on the second pass, breaking the whole script.
+func removeAndVerify(path, logPath string) string {
+	quoted := shellQuote(path)
+	rm := "rm -f " + quoted + " 2>/dev/null || true"
+	retry := "if [ -e " + quoted + " ]; then sleep 3; rm -f " + quoted + " 2>/dev/null || true; fi"
+
+	if logPath == "" {
+		return rm + "; " + retry
 	}
 
-	cmd := exec.Command("/bin/sh", "-c", script)
-	// Setsid detaches from our process group, which is what launchd kills.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd
+	stamp := "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+	quotedLog := shellQuote(logPath)
+	note := func(outcome string) string {
+		return "echo \"" + stamp + " " + outcome + " " + path + "\" >> " + quotedLog + " 2>/dev/null || true"
+	}
+	return rm + "; " + retry + "; " +
+		"if [ -e " + quoted + " ]; then " + note("FAILED to remove") + "; else " + note("removed") + "; fi"
+}
+
+// shellQuote wraps a path in single quotes for /bin/sh, escaping any single
+// quotes within it.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// systemdRunCommand builds the transient-unit invocation, or nil where that is
+// not available: no systemd, or not running as root.
+//
+// The unit name carries the process id so a leftover unit from an earlier
+// attempt cannot block this one — systemd refuses to reuse a name that still
+// exists, and that failure would otherwise cost the whole teardown.
+func systemdRunCommand(script string) *exec.Cmd {
+	if runtime.GOOS == "darwin" || os.Geteuid() != 0 {
+		return nil
+	}
+	path, err := exec.LookPath("systemd-run")
+	if err != nil {
+		return nil
+	}
+	return exec.Command(path,
+		"--collect",
+		fmt.Sprintf("--unit=monitorrr-uninstall-%d", os.Getpid()),
+		"--description=monitorrr agent uninstall",
+		"/bin/sh", "-c", script)
 }

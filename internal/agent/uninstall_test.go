@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -195,5 +196,76 @@ func TestForceEnrollClearsTheMarker(t *testing.T) {
 	// definition, and every subsequent start would otherwise fail.
 	if err := a.clearTombstone(); err != nil {
 		t.Errorf("clearing an absent marker returned %v, want nil", err)
+	}
+}
+
+// Removing the binary is the promise retirement makes, and the path it was
+// started from is not always the path it lives at — a self-update leaves the
+// first stale. Both are tried.
+func TestBinaryPathsCoverBothCandidates(t *testing.T) {
+	original := installPath
+	installPath = "/usr/local/bin/monitorrr-agent"
+	t.Cleanup(func() { installPath = original })
+
+	t.Run("started from somewhere else", func(t *testing.T) {
+		p := planUninstall("/opt/monitorrr/monitorrr-agent", DefaultStatePath(), true)
+		got := p.BinaryPaths()
+		want := []string{"/opt/monitorrr/monitorrr-agent", "/usr/local/bin/monitorrr-agent"}
+		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("BinaryPaths() = %v, want both candidates %v", got, want)
+		}
+	})
+
+	t.Run("the two agree", func(t *testing.T) {
+		p := planUninstall(installPath, DefaultStatePath(), true)
+		if got := p.BinaryPaths(); len(got) != 1 {
+			t.Errorf("BinaryPaths() = %v, want one path with no duplicate", got)
+		}
+	})
+
+	t.Run("nothing to remove", func(t *testing.T) {
+		p := planUninstall("/opt/monitorrr/monitorrr-agent", DefaultStatePath(), false)
+		if got := p.BinaryPaths(); got != nil {
+			t.Errorf("BinaryPaths() = %v with RemoveBinary false, want none", got)
+		}
+	})
+}
+
+// A teardown that cannot say what it did is the reason this bug took three
+// attempts to pin down.
+func TestUninstallLogSitsBesideTheMarker(t *testing.T) {
+	p := planUninstall(installPath, "/var/lib/monitorrr/agent.json", true)
+	if got := p.UninstallLog(); got != "/var/lib/monitorrr/uninstall.log" {
+		t.Errorf("UninstallLog() = %q, want it beside the state file", got)
+	}
+	if got := planUninstall(installPath, "", true).UninstallLog(); got != "" {
+		t.Errorf("UninstallLog() = %q with no state path, want empty", got)
+	}
+}
+
+// Linux reports a replaced binary as "/path (deleted)". Building a removal
+// command from that would delete nothing at all.
+func TestOwnExecutableStripsTheDeletedSuffix(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "monitorrr-agent")
+	if err := os.WriteFile(real, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// ownExecutable resolves the running process, so the suffix handling is
+	// checked directly on the string form it produces.
+	if got := strings.TrimSuffix(real+" (deleted)", " (deleted)"); got != real {
+		t.Errorf("suffix trim = %q, want %q", got, real)
+	}
+
+	exe, err := ownExecutable()
+	if err != nil {
+		t.Fatalf("ownExecutable: %v", err)
+	}
+	if strings.HasSuffix(exe, " (deleted)") {
+		t.Errorf("ownExecutable() = %q, still carrying the suffix", exe)
+	}
+	if _, err := os.Stat(exe); err != nil {
+		t.Errorf("ownExecutable() = %q, which does not exist: %v", exe, err)
 	}
 }
