@@ -124,6 +124,15 @@ func DefaultStatePath() string {
 
 // Run enrolls if needed, then checks in until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
+	// Checked before anything else: a retired machine must not come back as a
+	// new device just because a supervisor restarted the process.
+	if a.isTombstoned() {
+		a.log.Warn("this machine was retired; not enrolling",
+			"marker", tombstonePath(a.cfg.StatePath),
+			"hint", "delete the marker or reinstall the agent to enrol again")
+		return nil
+	}
+
 	if err := a.loadState(); err != nil {
 		return err
 	}

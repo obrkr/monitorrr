@@ -84,6 +84,18 @@ mkdir -p "$PREFIX"
 install -m 0755 "$tmp/monitorrr-agent" "$PREFIX/monitorrr-agent"
 echo "installed $PREFIX/monitorrr-agent"
 
+# A machine retired earlier carries a marker that stops the agent enrolling.
+# Installing is an explicit decision to bring it back, so clear it.
+if [ "$goos" = "darwin" ]; then
+	state_dir="/Library/Application Support/monitorrr"
+else
+	state_dir="/var/lib/monitorrr"
+fi
+if [ -f "$state_dir/retired" ]; then
+	rm -f "$state_dir/retired"
+	echo "cleared the previous retirement marker in $state_dir"
+fi
+
 if [ "$INSTALL_SERVICE" -eq 0 ]; then
 	echo
 	echo "Run it with:"

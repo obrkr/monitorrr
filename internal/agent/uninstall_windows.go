@@ -10,26 +10,36 @@ import (
 	"syscall"
 )
 
-// spawnUninstaller starts a detached cmd that tears down the installation after
-// this process exits. Windows will not delete a running executable, so the
-// delay is load-bearing rather than cosmetic.
-func spawnUninstaller(log *slog.Logger, exePath string, removeBinary bool, stateDir string) error {
-	var steps []string
-
-	// timeout is the shell-friendly sleep; the redirect keeps it quiet when
-	// there is no console attached, which is the case under a scheduled task.
-	parts := []string{"timeout /t 3 /nobreak >nul"}
+// spawnUninstaller starts a detached cmd that tears down the installation.
+//
+// The scheduled task is deleted first so nothing restarts the agent once it
+// exits. Windows will not delete a running executable, so the wait before
+// removing files is load-bearing rather than cosmetic.
+func spawnUninstaller(log *slog.Logger, plan uninstallPlan) error {
+	var (
+		steps []string
+		parts []string
+	)
 
 	parts = append(parts, `schtasks /delete /tn "monitorrr-agent" /f >nul 2>&1`)
 	steps = append(steps, "delete scheduled task monitorrr-agent")
 
-	if stateDir != "" {
-		parts = append(parts, fmt.Sprintf(`rmdir /s /q "%s" >nul 2>&1`, stateDir))
-		steps = append(steps, "remove "+stateDir)
+	// timeout is the shell-friendly sleep; the redirect keeps it quiet when
+	// there is no console attached, which is the case under a scheduled task.
+	parts = append(parts, "timeout /t 3 /nobreak >nul")
+
+	if plan.StatePath != "" {
+		parts = append(parts, fmt.Sprintf(`del /f /q "%s" >nul 2>&1`, plan.StatePath))
+		steps = append(steps, "remove "+plan.StatePath)
 	}
-	if removeBinary {
-		parts = append(parts, fmt.Sprintf(`del /f /q "%s" >nul 2>&1`, exePath))
-		steps = append(steps, "remove "+exePath)
+	if plan.RemoveStateDir {
+		// rmdir without /s: only removes the directory when it is empty.
+		parts = append(parts, fmt.Sprintf(`rmdir "%s" >nul 2>&1`, plan.StateDir))
+		steps = append(steps, "remove "+plan.StateDir+" (if empty)")
+	}
+	if plan.RemoveBinary {
+		parts = append(parts, fmt.Sprintf(`del /f /q "%s" >nul 2>&1`, plan.ExePath))
+		steps = append(steps, "remove "+plan.ExePath)
 	}
 
 	logUninstallPlan(log, steps)

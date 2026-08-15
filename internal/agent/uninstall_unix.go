@@ -17,14 +17,16 @@ const (
 	launchdPlist = "/Library/LaunchDaemons/io.monitorrr.agent.plist"
 )
 
-// spawnUninstaller starts a detached shell that tears down the installation a
-// few seconds after this process exits.
-func spawnUninstaller(log *slog.Logger, exePath string, removeBinary bool, stateDir string) error {
-	var steps []string
-
-	// A short delay lets this process exit first, so the service manager sees a
-	// clean shutdown rather than killing us partway through our own removal.
-	script := []string{"sleep 3"}
+// spawnUninstaller starts a detached shell that tears down the installation.
+//
+// Step order matters. The service is stopped first, with no delay, because
+// until it is gone the supervisor will restart the agent the moment we exit.
+// Only then do we wait and remove files.
+func spawnUninstaller(log *slog.Logger, plan uninstallPlan) error {
+	var (
+		steps  []string
+		script []string
+	)
 
 	switch runtime.GOOS {
 	case "darwin":
@@ -44,13 +46,24 @@ func spawnUninstaller(log *slog.Logger, exePath string, removeBinary bool, state
 		}
 	}
 
-	if stateDir != "" && stateDir != "/" && stateDir != "." {
-		script = append(script, fmt.Sprintf("rm -rf %q", stateDir))
-		steps = append(steps, "remove "+stateDir)
+	// Give the agent a moment to exit before its files go away.
+	script = append(script, "sleep 2")
+
+	if plan.StatePath != "" {
+		script = append(script, fmt.Sprintf("rm -f %q", plan.StatePath))
+		steps = append(steps, "remove "+plan.StatePath)
 	}
-	if removeBinary {
-		script = append(script, fmt.Sprintf("rm -f %q", exePath))
-		steps = append(steps, "remove "+exePath)
+	if plan.RemoveStateDir {
+		// rmdir, not rm -rf: if anything unexpected is in there, leaving it is
+		// far better than recursively deleting a directory we guessed at. In
+		// practice this leaves the directory holding just the retirement
+		// marker, which is intended — the marker must outlive teardown.
+		script = append(script, fmt.Sprintf("rmdir %q 2>/dev/null || true", plan.StateDir))
+		steps = append(steps, "remove "+plan.StateDir+" (if empty; the retirement marker is kept)")
+	}
+	if plan.RemoveBinary {
+		script = append(script, fmt.Sprintf("rm -f %q", plan.ExePath))
+		steps = append(steps, "remove "+plan.ExePath)
 	}
 
 	logUninstallPlan(log, steps)

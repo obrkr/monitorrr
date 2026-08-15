@@ -95,6 +95,35 @@ func TestRetireIsIdempotentAndValidated(t *testing.T) {
 	}
 }
 
+// A supervisor (systemd Restart, launchd KeepAlive) can restart the agent
+// inside the teardown window, so the same acknowledgement legitimately arrives
+// twice. The repeat must be a no-op, not a duplicate timeline entry.
+func TestCompleteRetirementIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	st := newTestStore(t)
+
+	id := mustDevice(t, st, "vm-01", "linux")
+	if err := st.RetireDevice(ctx, id); err != nil {
+		t.Fatalf("retire: %v", err)
+	}
+	if err := st.CompleteRetirement(ctx, id); err != nil {
+		t.Fatalf("first ack: %v", err)
+	}
+	if err := st.CompleteRetirement(ctx, id); err != nil {
+		t.Errorf("second ack = %v, want nil", err)
+	}
+
+	retired := 0
+	for _, k := range kinds(t, st) {
+		if k == EventRetired {
+			retired++
+		}
+	}
+	if retired != 1 {
+		t.Errorf("timeline has %d retired events, want exactly 1", retired)
+	}
+}
+
 // An agent must not be able to claim it retired when nobody asked it to.
 func TestCompleteRetirementRequiresRequest(t *testing.T) {
 	ctx := context.Background()

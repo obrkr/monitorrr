@@ -533,13 +533,32 @@ func (s *Store) CompleteRetirement(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	res, err := tx.ExecContext(ctx,
-		`UPDATE devices SET status = ? WHERE id = ? AND retired_at IS NOT NULL`, StatusRetired, id)
-	if err != nil {
-		return fmt.Errorf("complete retirement: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	var (
+		status    string
+		retiredAt sql.NullInt64
+	)
+	err = tx.QueryRowContext(ctx, `SELECT status, retired_at FROM devices WHERE id = ?`, id).
+		Scan(&status, &retiredAt)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read device: %w", err)
+	}
+	if !retiredAt.Valid {
+		// Nobody asked this device to retire; it does not get to decide.
+		return ErrNotFound
+	}
+	// A supervisor may restart the agent inside the teardown window, so the same
+	// acknowledgement can legitimately arrive twice. Treat the repeat as a no-op
+	// rather than writing a second "retired" line to the timeline.
+	if status == StatusRetired {
+		return nil
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE devices SET status = ? WHERE id = ?`, StatusRetired, id); err != nil {
+		return fmt.Errorf("complete retirement: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO device_events (device_id, ts, kind, detail) VALUES (?, ?, ?, ?)`,
