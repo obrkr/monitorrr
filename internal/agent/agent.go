@@ -80,8 +80,9 @@ type Agent struct {
 	seen map[string]bool
 
 	// The public address is cached between refreshes; see publicip.go.
-	cachedPublicIP  string
-	publicIPChecked time.Time
+	cachedPublicIP     string
+	publicIPChecked    time.Time
+	publicIPRefreshing bool
 }
 
 // New builds an Agent.
@@ -136,6 +137,15 @@ func (a *Agent) Run(ctx context.Context) error {
 			"marker", tombstonePath(a.cfg.StatePath),
 			"hint", "delete the marker or reinstall the agent to enrol again")
 		return nil
+	}
+
+	// Resolve the public address up front, off the check-in path, so it is
+	// usually known by the first heartbeat.
+	if !a.cfg.NoPublicIP {
+		a.mu.Lock()
+		a.publicIPRefreshing = true
+		a.mu.Unlock()
+		go a.refreshPublicIP()
 	}
 
 	if err := a.loadState(); err != nil {
@@ -257,7 +267,7 @@ func (a *Agent) checkin(ctx context.Context) error {
 		Arch:         runtime.GOARCH,
 		AgentVersion: FullVersion(),
 		LocalIPs:     localIPs(),
-		PublicIP:     a.publicIP(ctx),
+		PublicIP:     a.publicIP(),
 		Features:     proto.AgentFeatures,
 	}
 

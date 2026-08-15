@@ -1,6 +1,9 @@
 # build output and agent binaries served from the Deployment page
 /dist/
 
+# runtime state: the database lives here so `make clean` cannot remove it
+/data/
+
 # local state
 *.db
 *.db-wal

@@ -5,6 +5,10 @@
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-untracked)
 BUILDTIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 DIST      := dist
+# The database lives outside DIST so `make clean` cannot destroy it. Losing
+# every device's identity to a routine clean is not a recoverable mistake:
+# each agent would have to be reinstalled.
+DATA      := data
 
 # CGO is off everywhere: it is what makes both binaries statically linked and
 # lets every target cross-compile from one machine with no C toolchain.
@@ -50,7 +54,8 @@ build-all: build
 
 ## run: build and start the server on :8080
 run: build
-	./$(DIST)/monitorrr-server -addr :8080 -db $(DIST)/monitorrr.db -dist $(DIST)
+	@mkdir -p $(DATA)
+	./$(DIST)/monitorrr-server -addr :8080 -db $(DATA)/monitorrr.db -dist $(DIST)
 
 ## fmt, vet, test: standard checks
 fmt:
@@ -65,8 +70,10 @@ test:
 tidy:
 	go mod tidy
 
+## clean: remove build output. The database in $(DATA) is deliberately kept.
 clean:
 	rm -rf $(DIST)
+	@echo "removed $(DIST)/ — kept $(DATA)/ (database)"
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //'

@@ -185,7 +185,29 @@ Server flags (each also reads an env var):
 | `-public-url` | `MONITORRR_PUBLIC_URL` | *(inferred)* | Base URL shown in install commands |
 | `-tls-cert` / `-tls-key` | `MONITORRR_TLS_*` | *(none)* | Enable HTTPS directly |
 
-Agent flags: `-server`, `-enroll-token`, `-state`, `-insecure`, `-once`, `-debug`.
+Agent flags: `-server`, `-enroll-token`, `-state`, `-insecure`, `-once`,
+`-no-public-ip` (skip resolving the public address via a third party), `-debug`.
+
+The database defaults to `monitorrr.db` in the working directory; `make run`
+puts it in `data/`, deliberately outside `dist/` so `make clean` cannot destroy
+it. Losing it means every agent has to be reinstalled, since device identities
+live there.
+
+## Versioning
+
+Builds are stamped from git: `git describe` for the version and a UTC build
+timestamp to separate repeated builds of the same commit. Agents report the full
+string, so the dashboard shows exactly which build each machine is running —
+which is how you tell whether a fleet has picked up a fix.
+
+```
+monitorrr-agent v0.1.0-2-g6c2aac2 (2026-08-15T09:47:40Z)
+```
+
+Capabilities are advertised separately from the version. An agent sends the list
+of instructions it understands (`jobs`, `retire`), because a build identifier is
+opaque and an old agent silently ignores fields it does not know — the server
+needs to distinguish "will never act on this" from "has not got round to it".
 
 ## Security notes
 

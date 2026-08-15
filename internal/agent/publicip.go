@@ -22,44 +22,61 @@ var publicIPServices = []string{
 	"https://icanhazip.com",
 }
 
-// publicIP returns the cached address, resolving it when the cache is stale.
-// Failure is not an error worth surfacing: the field is informational, and a
-// heartbeat must never be held up by an unreachable third party.
-func (a *Agent) publicIP(ctx context.Context) string {
-	a.mu.Lock()
-	cached, checked := a.cachedPublicIP, a.publicIPChecked
-	a.mu.Unlock()
+// publicIPClient is deliberately separate from the client used to talk to the
+// monitorrr server. That one may have certificate verification disabled for a
+// self-signed lab certificate (-insecure), and that decision must not silently
+// extend to third-party services on the public internet.
+var publicIPClient = &http.Client{Timeout: 10 * time.Second}
 
-	if cached != "" && time.Since(checked) < publicIPRefresh {
-		return cached
-	}
+// publicIP returns the last known address, refreshing in the background when
+// stale. It never blocks: resolution talks to a third party that may be slow or
+// unreachable, and a heartbeat is not the place to wait for that. The cost is
+// that a freshly started agent reports no address on its first check-in, which
+// the server treats as "no change" rather than blanking the stored value.
+func (a *Agent) publicIP() string {
 	if a.cfg.NoPublicIP {
 		return ""
 	}
 
-	resolved := resolvePublicIP(ctx, a.client)
+	a.mu.Lock()
+	cached := a.cachedPublicIP
+	stale := time.Since(a.publicIPChecked) >= publicIPRefresh
+	if stale && !a.publicIPRefreshing {
+		a.publicIPRefreshing = true
+		go a.refreshPublicIP()
+	}
+	a.mu.Unlock()
+
+	return cached
+}
+
+// refreshPublicIP resolves the address and updates the cache.
+func (a *Agent) refreshPublicIP() {
+	resolved := resolvePublicIP(context.Background())
 
 	a.mu.Lock()
+	changed := resolved != "" && resolved != a.cachedPublicIP
 	// Keep the previous answer when resolution fails, so a transient outage
 	// does not blank the address on the dashboard.
 	if resolved != "" {
 		a.cachedPublicIP = resolved
 	}
+	// Stamp the attempt either way, so an unreachable service is retried on the
+	// normal schedule rather than on every single heartbeat.
 	a.publicIPChecked = time.Now()
-	cached = a.cachedPublicIP
+	a.publicIPRefreshing = false
 	a.mu.Unlock()
 
-	if resolved != "" && resolved != cached {
+	if changed {
 		a.log.Info("public address resolved", "ip", resolved)
 	}
-	return cached
 }
 
 // resolvePublicIP asks each service in turn until one answers with something
 // that parses as an IP address.
-func resolvePublicIP(ctx context.Context, client *http.Client) string {
-	// Short per-service timeout: three unreachable services must not add up to
-	// anything close to the check-in interval.
+func resolvePublicIP(ctx context.Context) string {
+	// One budget for all attempts: three unreachable services must not add up
+	// to anything close to a check-in interval.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -71,7 +88,7 @@ func resolvePublicIP(ctx context.Context, client *http.Client) string {
 		// ifconfig.me returns HTML to browsers and plain text to curl.
 		req.Header.Set("User-Agent", "curl/8")
 
-		res, err := client.Do(req)
+		res, err := publicIPClient.Do(req)
 		if err != nil {
 			continue
 		}
