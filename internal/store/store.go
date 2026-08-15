@@ -174,6 +174,7 @@ const StatusRetired = "retired"
 const (
 	settingEnrollToken     = "enroll_token"
 	settingDefaultInterval = "default_interval"
+	settingAutoUpdate      = "auto_update"
 )
 
 // DefaultInterval is the check-in period seeded on first run, in seconds.
@@ -355,6 +356,29 @@ func (s *Store) RotateEnrollToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return tok, nil
+}
+
+// AutoUpdateEnabled reports whether agents should replace themselves when the
+// server is serving a different build. Defaults to on: the alternative is a
+// fleet that silently drifts, which is exactly the problem it exists to solve.
+func (s *Store) AutoUpdateEnabled(ctx context.Context) (bool, error) {
+	v, err := s.setting(ctx, settingAutoUpdate)
+	if errors.Is(err, ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return v == "1", nil
+}
+
+// SetAutoUpdate turns fleet-wide self-update on or off.
+func (s *Store) SetAutoUpdate(ctx context.Context, enabled bool) error {
+	v := "0"
+	if enabled {
+		v = "1"
+	}
+	return s.setSetting(ctx, settingAutoUpdate, v)
 }
 
 // DefaultCheckinInterval returns the fleet-wide check-in period in seconds.

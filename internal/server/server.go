@@ -74,6 +74,8 @@ type Server struct {
 	// lanAddr is this host's outbound address, resolved once at startup and
 	// used when a request arrives on loopback — see publicURL.
 	lanAddr string
+	// builds caches the digest of each agent binary on disk.
+	builds *buildCache
 }
 
 // New builds a Server. The caller owns the store's lifetime.
@@ -86,7 +88,8 @@ func New(cfg Config, st *store.Store, log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse installer template: %w", err)
 	}
-	s := &Server{cfg: cfg, st: st, tmpl: tmpl, shTmpl: shTmpl, log: log, lanAddr: detectLANAddr()}
+	s := &Server{cfg: cfg, st: st, tmpl: tmpl, shTmpl: shTmpl, log: log,
+		lanAddr: detectLANAddr(), builds: newBuildCache()}
 	if s.lanAddr != "" {
 		log.Info("detected own network address", "addr", s.lanAddr,
 			"hint", "used in install commands when the dashboard is opened on localhost")
@@ -117,6 +120,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/collect/{id}/meta", s.handleCollectMeta)
 	mux.HandleFunc("POST /v1/collect/{id}/data", s.handleCollectData)
 	mux.HandleFunc("POST /v1/collect/{id}/complete", s.handleCollectComplete)
+	mux.HandleFunc("GET /v1/agent/binary", s.handleAgentBinary)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintln(w, "ok")
@@ -157,6 +161,7 @@ func (s *Server) routes() http.Handler {
 	admin.HandleFunc("POST /api/dispatch", s.handleFleetDispatch)
 	admin.HandleFunc("POST /api/settings/interval", s.handleSetInterval)
 	admin.HandleFunc("POST /api/settings/rotate-token", s.handleRotateToken)
+	admin.HandleFunc("POST /api/settings/auto-update", s.handleSetAutoUpdate)
 	admin.HandleFunc("GET /api/scripts", s.handleListScripts)
 	admin.HandleFunc("POST /api/scripts", s.handleSaveScript)
 	admin.HandleFunc("DELETE /api/scripts/{id}", s.handleDeleteScript)
@@ -374,8 +379,26 @@ func (s *Server) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("dispatched file collections", "device", id, "count", len(collections))
 	}
 
+	// An update is offered only when there is no work outstanding: replacing the
+	// binary means exiting, and an agent that vanished mid-job would leave the
+	// job to be swept as lost for no reason.
+	var update *proto.AgentUpdate
+	if len(jobs) == 0 && len(collections) == 0 {
+		if enabled, err := s.st.AutoUpdateEnabled(r.Context()); err != nil {
+			s.log.Error("could not read the auto-update setting", "error", err)
+		} else if enabled {
+			if device, err := s.st.GetDevice(r.Context(), id); err == nil {
+				update = s.updateFor(device, req.BinarySHA256)
+				if update != nil {
+					s.log.Info("offering agent update", "device", id,
+						"hostname", req.Hostname, "from", req.AgentVersion, "to", update.Version)
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, proto.CheckinResponse{
-		Interval: interval, Jobs: jobs, Collections: collections,
+		Interval: interval, Jobs: jobs, Collections: collections, Update: update,
 	})
 }
 
@@ -516,9 +539,15 @@ func (s *Server) handleDeployment(w http.ResponseWriter, r *http.Request) {
 		interval = store.DefaultInterval
 	}
 
+	autoUpdate, err := s.st.AutoUpdateEnabled(r.Context())
+	if err != nil {
+		autoUpdate = true
+	}
+
 	s.render(w, "deployment.html", map[string]any{
 		"Page":        "deployment",
 		"Version":     Version,
+		"AutoUpdate":  autoUpdate,
 		"ServerURL":   s.publicURL(r),
 		"EnrollToken": token,
 		"Interval":    interval,

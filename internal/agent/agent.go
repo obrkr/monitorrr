@@ -46,12 +46,13 @@ func FullVersion() string {
 
 // Config holds agent runtime options.
 type Config struct {
-	ServerURL   string
-	EnrollToken string
-	StatePath   string // defaults to a per-OS system path
-	Insecure    bool   // skip TLS verification (self-signed lab certs)
-	Once        bool   // single check-in, then exit — useful for testing
-	NoPublicIP  bool   // do not resolve the public address via a third party
+	ServerURL    string
+	EnrollToken  string
+	StatePath    string // defaults to a per-OS system path
+	Insecure     bool   // skip TLS verification (self-signed lab certs)
+	Once         bool   // single check-in, then exit — useful for testing
+	NoPublicIP   bool   // do not resolve the public address via a third party
+	NoAutoUpdate bool   // never replace our own binary
 }
 
 // state is the durable identity persisted between runs.
@@ -82,6 +83,10 @@ type Agent struct {
 	// seen guards against executing the same job twice if a check-in response
 	// is somehow redelivered.
 	seen map[string]bool
+
+	// The running binary's digest, computed once; see update.go.
+	binarySHA    string
+	binaryHashed bool
 
 	// The public address is cached between refreshes; see publicip.go.
 	cachedPublicIP     string
@@ -154,6 +159,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		go a.refreshPublicIP()
 	}
 
+	// A previous update may have left its predecessor behind on Windows.
+	cleanupOldBinary()
+
 	if err := a.loadState(); err != nil {
 		return err
 	}
@@ -178,7 +186,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	// while work is still queued; otherwise a worker runs alongside the loop.
 	if a.cfg.Once {
 		if err := a.checkin(ctx); err != nil {
-			if errors.Is(err, errRetired) {
+			if errors.Is(err, errRetired) || errors.Is(err, errUpdated) {
 				return nil
 			}
 			return err
@@ -199,6 +207,10 @@ func (a *Agent) Run(ctx context.Context) error {
 			backoff = time.Second
 		case errors.Is(err, errRetired):
 			// Uninstalled itself; exiting is the whole point.
+			return nil
+		case errors.Is(err, errUpdated):
+			// Binary replaced; exit so the supervisor starts the new one.
+			a.log.Info("exiting so the supervisor restarts the updated agent")
 			return nil
 		case errors.Is(err, errUnauthorized):
 			a.log.Warn("server rejected our identity, re-enrolling")
@@ -237,7 +249,19 @@ var (
 	errUnauthorized = errors.New("unauthorized")
 	// errRetired ends the run loop cleanly after a self-uninstall.
 	errRetired = errors.New("retired")
+	// errUpdated ends the run loop after the binary has been replaced, so the
+	// supervisor restarts us on the new version.
+	errUpdated = errors.New("updated")
 )
+
+// binarySHA256ForReport is the digest sent on check-in, or empty when this
+// agent has been told never to update itself.
+func (a *Agent) binarySHA256ForReport() string {
+	if a.cfg.NoAutoUpdate {
+		return ""
+	}
+	return a.ownBinarySHA256()
+}
 
 func (a *Agent) enroll(ctx context.Context) error {
 	if a.cfg.EnrollToken == "" {
@@ -277,6 +301,7 @@ func (a *Agent) checkin(ctx context.Context) error {
 		LocalIPs:     localIPs(),
 		PublicIP:     a.publicIP(),
 		Features:     proto.AgentFeatures,
+		BinarySHA256: a.binarySHA256ForReport(),
 	}
 
 	var resp proto.CheckinResponse
@@ -288,6 +313,16 @@ func (a *Agent) checkin(ctx context.Context) error {
 	if resp.Retire {
 		a.retire(ctx)
 		return errRetired
+	}
+
+	if resp.Update != nil {
+		if err := a.selfUpdate(ctx, resp.Update); err != nil {
+			// A failed update is not fatal: the current agent keeps running and
+			// reporting, and the server will offer the update again.
+			a.log.Error("agent update failed, continuing on the current version", "error", err)
+		} else {
+			return errUpdated
+		}
 	}
 
 	if resp.Interval > 0 && time.Duration(resp.Interval)*time.Second != a.interval {

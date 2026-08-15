@@ -125,6 +125,38 @@ path (`/usr/local/bin/monitorrr-agent`, or `C:\Program Files\monitorrr\`).
 Someone testing a build from a working directory should not have it deleted out
 from under them.
 
+### Agent auto-update
+
+Agents replace their own binary when the server is serving a different build for
+their platform. The comparison is between **digests, not version strings**: a
+version is opaque text that can repeat across rebuilds or go backwards, and an
+agent that updated to a build reporting the same version would be told to update
+again forever. Digests cannot loop — once the agent is running the served bytes,
+there is nothing left to offer.
+
+The order of operations is the safety story:
+
+1. Download to a staging file beside the target, never over it
+2. Verify the digest matches what the server said
+3. **Run the replacement** with `-version` and check it identifies itself
+4. Swap it in, then exit so the supervisor restarts on the new version
+
+Step 3 is the important one. A truncated or wrong-architecture binary that
+passes a checksum but cannot execute would brick every machine it reached, and
+the fleet would have no way to receive the fix. Any failure leaves the existing
+installation untouched, and the agent keeps running and reporting.
+
+Updates are only offered when a device has no jobs or collections outstanding:
+updating means exiting, and an agent that vanished mid-job would leave that job
+to be swept as lost for nothing. Only a binary at the canonical install path is
+replaced, so a developer's build is never overwritten. `-no-auto-update` opts a
+machine out entirely; the Deployment page has a fleet-wide switch.
+
+On Unix the running binary is renamed over directly — the running process keeps
+its old inode until it exits. Windows refuses to overwrite a running image but
+allows renaming one, so the old binary is moved aside and cleaned up on the next
+start.
+
 ### Collecting files from a device
 
 A full path typed on the device page pulls that file back. The agent reports the

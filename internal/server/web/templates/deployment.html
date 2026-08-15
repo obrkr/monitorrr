@@ -23,7 +23,23 @@
 
     <label>Check-in interval</label>
     <div class="field"><code>{{.Interval}} seconds</code></div>
+
+    <label>Auto-update</label>
+    <div class="field">
+      <label class="switch">
+        <input type="checkbox" id="auto-update" {{if .AutoUpdate}}checked{{end}}>
+        <span id="auto-update-state">{{if .AutoUpdate}}enabled{{else}}disabled{{end}}</span>
+      </label>
+      <span class="muted">agents replace themselves when this server serves a different build</span>
+    </div>
   </div>
+  <p class="note">
+    Agents compare the digest of their own binary with the one this server would
+    send them, so an update happens exactly once and cannot loop. A replacement
+    is downloaded, checksum-verified, and <em>run</em> before it is installed — a
+    binary that cannot execute is discarded rather than bricking the machine.
+    Updates are never offered while a device has work outstanding.
+  </p>
   <p class="note">
     Rotating the token blocks <em>new</em> enrollments with the old value. Devices
     already enrolled keep working — they authenticate with a per-device token

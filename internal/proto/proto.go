@@ -36,10 +36,11 @@ const (
 	FeatureRetire   = "retire"
 	FeaturePayloads = "payloads"
 	FeatureCollect  = "collect"
+	FeatureUpdate   = "autoupdate"
 )
 
 // AgentFeatures is what this build of the agent advertises.
-var AgentFeatures = []string{FeatureJobs, FeatureRetire, FeaturePayloads, FeatureCollect}
+var AgentFeatures = []string{FeatureJobs, FeatureRetire, FeaturePayloads, FeatureCollect, FeatureUpdate}
 
 // CheckinRequest is the heartbeat, sent every Interval seconds.
 type CheckinRequest struct {
@@ -53,6 +54,11 @@ type CheckinRequest struct {
 	// itself: it only sees the source address of the connection, which is a
 	// private address whenever the agent is on the same network.
 	PublicIP string `json:"public_ip,omitempty"`
+	// BinarySHA256 is the digest of the agent's own executable. Auto-update
+	// compares digests rather than version strings: a version is opaque text
+	// that can repeat or go backwards, whereas "these bytes differ from the
+	// bytes I am serving" is unambiguous and cannot loop.
+	BinarySHA256 string `json:"binary_sha256,omitempty"`
 	// Features is absent on agents predating capability advertisement, which is
 	// itself the signal that they are old.
 	Features []string `json:"features,omitempty"`
@@ -112,10 +118,22 @@ type CheckinResponse struct {
 	Jobs     []Job `json:"jobs,omitempty"`
 	// Collections are files to send back to the server.
 	Collections []Collect `json:"collections,omitempty"`
+	// Update is set when a different agent build is available for this
+	// device's platform.
+	Update *AgentUpdate `json:"update,omitempty"`
 	// Retire tells the agent to uninstall itself and stop. It is the opposite
 	// of deleting a device record, which a running agent simply recovers from
 	// by re-enrolling.
 	Retire bool `json:"retire,omitempty"`
+}
+
+// AgentUpdate tells an agent a different build is available. The digest is of
+// the replacement binary, which the agent verifies after downloading and before
+// installing.
+type AgentUpdate struct {
+	SHA256  string `json:"sha256"`
+	Size    int64  `json:"size"`
+	Version string `json:"version"`
 }
 
 // Error is the body returned with any non-2xx response.

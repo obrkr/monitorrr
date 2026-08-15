@@ -979,6 +979,24 @@ if (revealBtn) {
   });
 }
 
+const autoUpdateBox = $("#auto-update");
+if (autoUpdateBox) {
+  autoUpdateBox.addEventListener("change", async (e) => {
+    const enabled = e.target.checked;
+    try {
+      await api("/api/settings/auto-update", {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
+      });
+      $("#auto-update-state").textContent = enabled ? "enabled" : "disabled";
+      toast(enabled ? "Auto-update enabled" : "Auto-update disabled");
+    } catch (err) {
+      e.target.checked = !enabled;
+      toast(err.message, true);
+    }
+  });
+}
+
 const rotateBtn = $("#rotate-token");
 if (rotateBtn) {
   rotateBtn.addEventListener("click", async () => {
