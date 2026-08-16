@@ -41,7 +41,7 @@ A self-hosted **endpoint visibility and remote execution** tool for a home lab. 
 - **Heartbeat monitoring** — online/offline state, last seen, the device's public internet address and its own interfaces, on a check-in interval you set centrally.
 - **Remote execution** — write `sh` and PowerShell scripts, dispatch them to one device or a whole tag, and read back exit code, duration, stdout and stderr.
 - **Push a file and run it** — attach an installer to a script; the agent fetches it, verifies its digest, and hands the path to your script.
-- **Collect a file** — give a full path and the agent sends it back. Size first, then a transfer with progress. Locked files are copied aside and read from the copy.
+- **Collect a file** — give a full path and the agent sends it back. Size first, then a transfer with progress. A file that cannot be read directly is copied aside and read from the copy.
 - **Tags and fleet dispatch** — label devices and run one script across everything matching, with incompatible machines reported rather than silently skipped.
 - **Starter library** — twelve read-only diagnostics, `sh` and PowerShell pairs, imported with one click.
 - **Self-updating agents** — the server serves a new build and agents replace themselves, verifying the replacement runs before installing it.
@@ -167,7 +167,7 @@ Bytes live on disk beside the database and are streamed in both directions. A pu
 
 A full path typed on the device page pulls that file back. The agent reports the **size first**, before any bytes move — asking for a 40 GB VM image by mistake should be obvious from the dashboard, not discovered an hour later. The transfer then streams with a live progress bar.
 
-A file that cannot be opened directly is **copied aside and read from the copy**, which is how a locked or in-use file becomes collectable; the copy is removed afterwards. That fallback cannot fix everything, so the failure messages distinguish the two cases: a permissions failure is fixed by how the agent is installed, a lock is not.
+A file that cannot be opened directly is **copied aside and read from the copy**, which is how many in-use files become collectable; the copy is removed afterwards. The fallback has limits, and they differ by platform: on Windows a file held with no sharing at all defeats the copy too, because `Copy-Item` has to open it the same way a read does — only a shadow copy could get past that, which the agent does not do. So the failure messages distinguish the cases rather than reporting one "could not collect": a permissions failure is fixed by how the agent is installed, and a lock is not fixable at all.
 
 Collected files are kept for **7 days**, then deleted. The record survives the file — knowing something was pulled, by whom, and that it has since been removed is the point of an audit trail — and downloading an expired collection returns 410 with that explanation rather than a bare 404.
 
@@ -191,7 +191,11 @@ is every bit as real as one in `/usr/local/bin`. With no service registered
 nothing is deleted — that is someone running a build by hand, and removing it
 under them would be a surprise for no benefit.
 
-Teardown runs in a **detached helper process**, not inline. Stopping your own service from inside it is a race you cannot win: systemd would kill the agent partway through its own cleanup, and Windows refuses to delete a running executable.
+Teardown runs in a **separate process**, not inline. Stopping your own service from inside it is a race you cannot win: systemd would kill the agent partway through its own cleanup, and Windows refuses to delete a running executable.
+
+Detaching that process is not enough, which cost two rounds of testing to learn. A service manager does not track its children by process group; it tracks them by container, and it kills the container. On Linux that is a cgroup, which `setsid` does nothing about; on Windows it is a job object, which `DETACHED_PROCESS` does nothing about. Both killed the helper before it had removed anything, and both did it silently. So the helper is handed to the service manager itself — a transient `systemd-run` unit, or its own scheduled task — which puts it in a container of its own. Where that is unavailable it falls back to a detached process, and the steps are ordered so that stopping the service comes last, after everything else is already gone. Either mechanism alone is sufficient; together they cover hosts that have neither.
+
+Every removal is verified rather than assumed, and the outcome is appended to an `uninstall.log` beside the retirement marker. `rm -f` and `del /q` both report success whether or not the file went, which is precisely what made this class of bug invisible.
 
 Retirement leaves a marker beside the identity file, and an agent that finds one exits instead of enrolling. That is what stops a supervisor restart quietly resurrecting a decommissioned machine as a ghost device — the failure this protects against is real, and was found by testing rather than reasoning. Coming back is therefore deliberate: reinstall (the installer clears the marker), run once with `-force-enroll`, or delete the marker by hand. The machine returns as a **new device**; the retired record is history, not something to reuse.
 
